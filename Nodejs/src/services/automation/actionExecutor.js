@@ -89,7 +89,7 @@ const resolveInvoiceDetails = async ({ automation, userId, context }) => {
   return invoice;
 };
 
-const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOverride = null }) => {
+const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverride = null }) => {
   const { subject: templateSubject, body: templateBody } = await validateMailTemplate({ automation, userId });
 
   const invoice = await resolveInvoiceDetails({ automation, userId, context });
@@ -119,14 +119,20 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
     invoice,
   });
 
+  return { to: recipient, subject, body: finalBodyText, html };
+};
+
+const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOverride = null }) => {
+  const rendered = await renderTemplateEmail({ automation, userId, context, bodyTextOverride });
+
   await sendBasicEmail({
-    to: recipient,
-    subject,
-    text: finalBodyText,
-    html,
+    to: rendered.to,
+    subject: rendered.subject,
+    text: rendered.body,
+    html: rendered.html,
   });
 
-  return { to: recipient, subject, body: finalBodyText, mode: "sent" };
+  return { to: rendered.to, subject: rendered.subject, body: rendered.body, mode: "sent" };
 };
 
 const executeAiForEmailReceived = async ({ automation, userId, context, asDraft }) => {
@@ -171,19 +177,21 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
     relevantData,
   });
 
-  const actionResult = await executeTemplateMailSend({
-    automation,
-    userId,
-    context: {
-      ...context,
-      email: incoming,
-      customer: relevantData.customer || context?.customer,
-      invoice: relevantData.invoice || context?.invoice,
-    },
-    bodyTextOverride: aiResponse,
-  });
+  const actionContext = {
+    ...context,
+    email: incoming,
+    customer: relevantData.customer || context?.customer,
+    invoice: relevantData.invoice || context?.invoice,
+  };
 
   if (!asDraft) {
+    const actionResult = await executeTemplateMailSend({
+      automation,
+      userId,
+      context: actionContext,
+      bodyTextOverride: aiResponse,
+    });
+
     return {
       ...actionResult,
       classification,
@@ -192,12 +200,19 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
     };
   }
 
+  const preview = await renderTemplateEmail({
+    automation,
+    userId,
+    context: actionContext,
+    bodyTextOverride: aiResponse,
+  });
+
   const draft = await createDraftEmail({
     userId,
     automationId: automation.id,
-    to: actionResult.to,
-    subject: actionResult.subject,
-    body: actionResult.body,
+    to: preview.to,
+    subject: preview.subject,
+    body: preview.body,
   });
 
   return {
