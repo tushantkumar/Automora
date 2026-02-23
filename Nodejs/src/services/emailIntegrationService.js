@@ -357,6 +357,61 @@ const fetchImapMessages = async ({ folder, search = "", page = 1, pageSize = 20,
   }
 };
 
+const fetchGmailMessagesViaImapOAuth = async ({ accessToken, connectedEmail, maxResults = 50 }) => {
+  const { ImapFlow, simpleParser } = await loadImapDependencies();
+
+  const client = new ImapFlow({
+    host: "imap.gmail.com",
+    port: 993,
+    secure: true,
+    auth: {
+      user: String(connectedEmail || "").trim(),
+      accessToken,
+    },
+  });
+
+  await client.connect();
+
+  try {
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      const uids = [];
+      for await (const msg of client.fetch("1:*", { uid: true })) {
+        uids.push(Number(msg.uid));
+      }
+
+      const targetUids = uids
+        .sort((a, b) => b - a)
+        .slice(0, Math.max(Number(maxResults || 50), 1));
+
+      const emails = [];
+      for (const uid of targetUids) {
+        for await (const msg of client.fetch(String(uid), { uid: true, source: true, envelope: true, internalDate: true })) {
+          const parsed = await simpleParser(msg.source);
+          const from = parsed.from?.value?.[0];
+          const body = String(parsed.text || parsed.html || "").trim();
+
+          emails.push({
+            externalId: String(msg.uid),
+            fromName: from?.name || from?.address || "Unknown sender",
+            fromEmail: from?.address || "",
+            subject: String(parsed.subject || msg.envelope?.subject || "(no subject)"),
+            snippet: body.slice(0, 2000),
+            folder: "INBOX",
+            receivedAt: (msg.internalDate || new Date()).toISOString(),
+          });
+        }
+      }
+
+      return emails;
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout();
+  }
+};
+
 const fetchGmailThreadMessages = async ({ accessToken, messageId, connectedEmail }) => {
   if (!messageId) return [];
 
@@ -463,7 +518,11 @@ export const handleGmailCallback = async ({ code, state }) => {
     connectedEmail: profile?.emailAddress || null,
   });
 
-  const emails = await fetchGmailMessages(tokenData.access_token, 50);
+  const emails = await fetchGmailMessagesViaImapOAuth({
+    accessToken: tokenData.access_token,
+    connectedEmail: profile?.emailAddress || "",
+    maxResults: 50,
+  });
   const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
   await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
   await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
@@ -488,7 +547,11 @@ export const syncGmailEmails = async (authHeader) => {
   }
 
   try {
-    const emails = await fetchGmailMessages(integration.access_token, 50);
+    const emails = await fetchGmailMessagesViaImapOAuth({
+      accessToken: integration.access_token,
+      connectedEmail: integration.connected_email || "",
+      maxResults: 50,
+    });
     const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
     await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
     await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
