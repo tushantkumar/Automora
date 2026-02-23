@@ -58,14 +58,15 @@ export const upsertInboxEmails = async ({ userId, provider, emails }) => {
   for (const email of emails) {
     const result = await pool.query(
       `INSERT INTO auth_inbox_emails
-        (id, user_id, provider, external_id, from_name, from_email, subject, snippet, received_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (id, user_id, provider, external_id, from_name, from_email, subject, snippet, folder, received_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (user_id, provider, external_id)
        DO UPDATE SET
          from_name = EXCLUDED.from_name,
          from_email = EXCLUDED.from_email,
          subject = EXCLUDED.subject,
          snippet = EXCLUDED.snippet,
+         folder = EXCLUDED.folder,
          received_at = EXCLUDED.received_at,
          updated_at = NOW()`,
       [
@@ -77,6 +78,7 @@ export const upsertInboxEmails = async ({ userId, provider, emails }) => {
         email.fromEmail,
         email.subject,
         email.snippet,
+        email.folder || "INBOX",
         email.receivedAt,
       ],
     );
@@ -133,18 +135,31 @@ export const markInboxEmailReplied = async ({ userId, provider, externalId }) =>
   return result.rowCount > 0;
 };
 
-export const listInboxEmailsByUserId = async ({ userId, search = "", category = "" }) => {
-  const result = await pool.query(
-    `SELECT id, provider, external_id, from_name, from_email, subject, snippet, category, confidence_score::float8 AS confidence_score, replied_at, received_at, created_at, updated_at
-     FROM auth_inbox_emails
-     WHERE user_id = $1
-       AND ($2::text = '' OR subject ILIKE '%' || $2 || '%' OR from_name ILIKE '%' || $2 || '%' OR from_email ILIKE '%' || $2 || '%')
-       AND ($3::text = '' OR UPPER(COALESCE(category, '')) = UPPER($3))
-     ORDER BY received_at DESC, created_at DESC`,
-    [userId, search, category],
-  );
+export const listInboxEmailsByUserId = async ({ userId, search = "", category = "", folder = "INBOX", limit = 20, offset = 0 }) => {
+  const [rowsResult, countResult] = await Promise.all([
+    pool.query(
+      `SELECT id, provider, external_id, from_name, from_email, subject, snippet, folder, category, confidence_score::float8 AS confidence_score, replied_at, received_at, created_at, updated_at
+       FROM auth_inbox_emails
+       WHERE user_id = $1
+         AND ($2::text = '' OR subject ILIKE '%' || $2 || '%' OR from_name ILIKE '%' || $2 || '%' OR from_email ILIKE '%' || $2 || '%')
+         AND ($3::text = '' OR UPPER(COALESCE(category, '')) = UPPER($3))
+         AND ($4::text = '' OR UPPER(COALESCE(folder, 'INBOX')) = UPPER($4))
+       ORDER BY received_at DESC, created_at DESC
+       LIMIT $5 OFFSET $6`,
+      [userId, search, category, folder, limit, offset],
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM auth_inbox_emails
+       WHERE user_id = $1
+         AND ($2::text = '' OR subject ILIKE '%' || $2 || '%' OR from_name ILIKE '%' || $2 || '%' OR from_email ILIKE '%' || $2 || '%')
+         AND ($3::text = '' OR UPPER(COALESCE(category, '')) = UPPER($3))
+         AND ($4::text = '' OR UPPER(COALESCE(folder, 'INBOX')) = UPPER($4))`,
+      [userId, search, category, folder],
+    ),
+  ]);
 
-  return result.rows;
+  return { rows: rowsResult.rows, total: Number(countResult.rows[0]?.total || 0) };
 };
 
 

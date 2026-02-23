@@ -7,6 +7,7 @@ import {
   getInboxAiReplyHandler,
   gmailCallbackHandler,
   syncGmailEmailsHandler,
+  syncImapEmailsHandler,
   sendGmailEmailHandler,
   disconnectEmailIntegrationHandler,
 } from "../controllers/emailIntegrationController.js";
@@ -17,6 +18,7 @@ emailIntegrationRouter.get("/email-integrations", getEmailIntegrationStatusHandl
 emailIntegrationRouter.get("/email-integrations/gmail/connect", getGmailAuthorizationUrlHandler);
 emailIntegrationRouter.get("/email-integrations/gmail/callback", gmailCallbackHandler);
 emailIntegrationRouter.post("/email-integrations/gmail/sync", syncGmailEmailsHandler);
+emailIntegrationRouter.post("/emails/imap/sync", syncImapEmailsHandler);
 emailIntegrationRouter.get("/emails", getInboxEmailsHandler);
 emailIntegrationRouter.get("/emails/thread/:externalId", getInboxThreadHandler);
 emailIntegrationRouter.post("/emails/send", sendGmailEmailHandler);

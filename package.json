@@ -74,7 +74,10 @@
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
     "zod": "^3.25.76",
-    "zod-validation-error": "^3.4.0"
+    "zod-validation-error": "^3.4.0",
+    "imapflow": "^1.0.181",
+    "mailparser": "^3.7.2",
+    "nodemailer": "^6.9.16"
   },
   "devDependencies": {
     "@replit/vite-plugin-cartographer": "^0.4.4",

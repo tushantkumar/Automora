@@ -21,3 +21,12 @@ export const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-oss-
 
 export const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1";
+
+
+export const IMAP_HOST = process.env.IMAP_HOST || "";
+export const IMAP_PORT = Number(process.env.IMAP_PORT || 993);
+export const IMAP_SECURE = String(process.env.IMAP_SECURE || "true") !== "false";
+export const IMAP_USER = process.env.IMAP_USER || "";
+export const IMAP_PASS = process.env.IMAP_PASS || "";
+
+export const SMTP_TLS = String(process.env.SMTP_TLS || "true") !== "false";
