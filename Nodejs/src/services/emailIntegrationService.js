@@ -7,7 +7,6 @@ import {
   getInboxEmailByExternalId,
   listInboxEmailsByUserId,
   markInboxEmailReplied,
-  updateInboxEmailClassification,
   upsertEmailIntegration,
   upsertInboxEmails,
 } from "../db/emailIntegrationRepository.js";
@@ -64,84 +63,6 @@ const parseAddressHeader = (value) => {
 const processedIncomingEmailIds = new Set();
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
-
-const EMAIL_CATEGORIES = ["INVOICE", "QUERY", "SUPPORT", "CUSTOMER", "OTHER"];
-
-const classifyEmailWithOllama = async (emailBody) => {
-  const prompt = `You are an email classification assistant.
-
-Classify this email into ONE of the following:
-- INVOICE
-- QUERY
-- SUPPORT
-- CUSTOMER
-- OTHER
-
-Return ONLY the category name.
-Also return confidence percentage.
-
-Email Content:
-${String(emailBody || "")}
-
-Return JSON:
-{
-  "category": "...",
-  "confidence": 0.92
-}`;
-
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt,
-      stream: false,
-      format: "json",
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error || "Ollama classification failed");
-  }
-
-  const raw = String(data?.response || "").trim();
-  const parsed = JSON.parse(raw || "{}");
-  const category = String(parsed?.category || "").trim().toUpperCase();
-  const confidenceRaw = Number(parsed?.confidence);
-  const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0;
-
-  return {
-    category: EMAIL_CATEGORIES.includes(category) ? category : "OTHER",
-    confidence,
-  };
-};
-
-const classifyAndPersistInboxEmails = async ({ userId, provider, emails }) => {
-  for (const email of Array.isArray(emails) ? emails : []) {
-    const externalId = String(email?.externalId || "").trim();
-    if (!externalId) continue;
-
-    try {
-      const classification = await classifyEmailWithOllama(String(email?.snippet || ""));
-      await updateInboxEmailClassification({
-        userId,
-        provider,
-        externalId,
-        category: classification.category,
-        confidenceScore: classification.confidence,
-      });
-    } catch {
-      await updateInboxEmailClassification({
-        userId,
-        provider,
-        externalId,
-        category: "OTHER",
-        confidenceScore: 0,
-      });
-    }
-  }
-};
 
 const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "" }) => {
   const rows = Array.isArray(emails) ? emails : [];
@@ -375,7 +296,6 @@ export const handleGmailCallback = async ({ code, state }) => {
   const emails = await fetchGmailMessages(tokenData.access_token, 50);
   const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
   await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-  await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
   await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: profile?.emailAddress || "" });
 
   return {
@@ -400,7 +320,6 @@ export const syncGmailEmails = async (authHeader) => {
     const emails = await fetchGmailMessages(integration.access_token, 50);
     const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
     await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-    await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
     await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: integration.connected_email || "" });
 
     return { status: 200, body: { message: "Emails synced", syncedEmails: normalizedEmails.length } };
@@ -413,14 +332,12 @@ export const getInboxEmails = async (authHeader, query = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
-  const category = String(query.category || "").trim().toUpperCase();
   const emails = await listInboxEmailsByUserId({
     userId: user.id,
     search: String(query.search || "").trim(),
-    category: EMAIL_CATEGORIES.includes(category) ? category : "",
   });
 
-  return { status: 200, body: { emails, categories: EMAIL_CATEGORIES } };
+  return { status: 200, body: { emails } };
 };
 
 export const getInboxThread = async (authHeader, externalId = "") => {
