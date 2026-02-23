@@ -23,7 +23,7 @@ const getAuthorizedUser = async (authHeader) => {
 
 const ALLOWED_TRIGGERS = ["Email Received", "Customer", "Invoice"];
 const ALLOWED_SUB_TRIGGERS = ["On Change", "Daily", "Weekly", "Monthly", "Day Before Overdue"];
-const ALLOWED_ACTIONS = ["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)", "CRM", "Invoice"];
+const ALLOWED_ACTIONS = ["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)", "CRM", "Invoice"];
 const ALLOWED_OPERATORS = [
   "equals",
   "not equals",
@@ -60,8 +60,12 @@ const normalizeConditionValue = (operator, value) => {
 };
 
 const validateConditions = (conditions, fieldsMap) => {
-  if (!Array.isArray(conditions) || conditions.length === 0) {
-    return "At least one condition is required";
+  if (!Array.isArray(conditions)) {
+    return "Conditions payload is invalid";
+  }
+
+  if (conditions.length === 0) {
+    return null;
   }
 
   for (const condition of conditions) {
@@ -115,6 +119,10 @@ const validateAndNormalizePayload = async ({ userId, payload, excludeAutomationI
     return { error: "Sub-trigger is only allowed when trigger is Invoice" };
   }
 
+  if ((triggerType === "Customer" || triggerType === "Invoice") && conditions.length === 0) {
+    return { error: "At least one condition is required for Customer/Invoice triggers" };
+  }
+
   const metadata = await getAutomationEntityFields();
   const fieldsMap = new Map(metadata.map((item) => [`${item.entity}.${item.key}`, item]));
 
@@ -122,7 +130,7 @@ const validateAndNormalizePayload = async ({ userId, payload, excludeAutomationI
   if (conditionValidationError) return { error: conditionValidationError };
   if (!["AND", "OR"].includes(conditionLogic)) return { error: "Condition logic must be AND or OR" };
 
-  if (["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(actionType)) {
+  if (["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(actionType)) {
     if (!mailTemplateId) return { error: "Mail template is required for selected action" };
 
     const templates = await listMailTemplatesByUserId(userId);

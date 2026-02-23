@@ -17,3 +17,7 @@ export const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "http://lo
 
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 export const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-oss-120b:free";
+
+
+export const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1";

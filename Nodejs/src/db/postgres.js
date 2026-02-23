@@ -212,6 +212,19 @@ export const initDatabase = async () => {
   EXCEPTION
     WHEN duplicate_object THEN NULL;
   END $$;`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_draft_emails (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+      automation_id TEXT NOT NULL REFERENCES auth_automations(id) ON DELETE CASCADE,
+      recipient_email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
   await pool.query(`
     INSERT INTO auth_mail_templates (id, user_id, name, subject, body)
     SELECT
@@ -267,4 +280,5 @@ export const ensureDatabaseIndexes = async () => {
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_account_delete_otps_expires_idx ON auth_account_delete_otps(expires_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_automations_user_id_idx ON auth_automations(user_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_automations_trigger_type_idx ON auth_automations(trigger_type);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_draft_emails_user_id_idx ON auth_draft_emails(user_id);`);
 };

@@ -8,6 +8,7 @@ import {
   upsertEmailIntegration,
   upsertInboxEmails,
 } from "../db/emailIntegrationRepository.js";
+import { runAutomations } from "./automation/executionEngine.js";
 import {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
@@ -60,16 +61,10 @@ const processedIncomingEmailIds = new Set();
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
-const classifyEmailFilter = ({ subject, snippet }) => {
-  const text = `${String(subject || "")} ${String(snippet || "")}`.toLowerCase();
-  if (/\b(invoice|bill|billing)\b/.test(text)) return "invoice_request";
-  if (/support|issue|bug|error|help/.test(text)) return "support_ticket";
-  return "any";
-};
-
 const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "" }) => {
   const rows = Array.isArray(emails) ? emails : [];
   const normalizedOwnerEmail = normalizeEmail(ownerEmail || user?.email || "");
+  const executionResults = [];
 
   for (const email of rows) {
     const externalId = String(email?.externalId || "").trim();
@@ -83,25 +78,27 @@ const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "
       if (first) processedIncomingEmailIds.delete(first);
     }
 
-    const emailFilter = classifyEmailFilter({ subject: email?.subject, snippet: email?.snippet });
     const messageBody = String(email?.snippet || "");
 
-    await processWorkflowEventForUserContext(user, {
-      triggerType: "email_received",
-      emailFilter,
-      eventPayload: {
-        eventType: "email_received",
-        customerName: String(email?.fromName || email?.fromEmail || "Customer"),
-        customerEmail: String(email?.fromEmail || "").trim(),
-        emailSubject: String(email?.subject || "(no subject)"),
-        messageBody,
-        emailBody: messageBody,
-        body: messageBody,
-        externalEmailId: externalId,
-        organizationName: user.organization_name || "",
+    const results = await runAutomations({
+      triggerType: "Email Received",
+      context: {
+        user,
+        email: {
+          from: String(email?.fromEmail || "").trim(),
+          subject: String(email?.subject || "(no subject)"),
+          body: messageBody,
+          attachments: [],
+          externalId,
+          fromName: String(email?.fromName || ""),
+        },
       },
     });
+
+    executionResults.push({ externalId, results });
   }
+
+  return executionResults;
 };
 const buildGmailAuthUrl = ({ token }) => {
   const params = new URLSearchParams({

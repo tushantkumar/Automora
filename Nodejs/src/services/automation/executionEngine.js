@@ -13,23 +13,40 @@ export const runAutomations = async ({ triggerType, subTriggerType = null, conte
     listActiveAutomationsByTrigger({ triggerType, subTrigger: subTriggerType }),
   ]);
 
+  const results = [];
+
   for (const automation of automations) {
-    const passed = evaluateConditions({
-      conditions: automation.conditions,
-      logic: automation.condition_logic,
-      fieldTypeMap,
-      context,
-    });
+    const hasConditions = Array.isArray(automation.conditions) && automation.conditions.length > 0;
+    const passed = hasConditions
+      ? evaluateConditions({
+          conditions: automation.conditions,
+          logic: automation.condition_logic,
+          fieldTypeMap,
+          context,
+        })
+      : true;
 
     if (!passed) continue;
 
     try {
-      await executeAutomationAction({ automation, context });
+      const actionResult = await executeAutomationAction({ automation, context });
+      results.push({
+        automationId: automation.id,
+        actionType: automation.action_type,
+        result: actionResult,
+      });
     } catch (error) {
       console.error("Automation action execution failed", {
         automationId: automation.id,
         error,
       });
+      results.push({
+        automationId: automation.id,
+        actionType: automation.action_type,
+        error: String(error?.message || error || "execution error"),
+      });
     }
   }
+
+  return results;
 };

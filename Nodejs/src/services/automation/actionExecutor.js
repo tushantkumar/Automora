@@ -5,16 +5,13 @@ import {
   createInvoice,
   getInvoiceByNumberForUser,
   getInvoiceWithCustomerByIdForAutomation,
+  getLatestInvoiceForCustomerEmail,
   updateInvoiceById,
 } from "../../db/invoiceRepository.js";
 import { createUserId, normalizeEmail } from "../../utils/auth.js";
-import { generateAutomationContent } from "./aiService.js";
+import { classifyIncomingEmail, generateAutomationContent } from "./aiService.js";
 import { buildAutomationEmailLayout } from "./emailLayout.js";
-
-const getByPath = (obj, path) => String(path || "")
-  .split(".")
-  .reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), obj);
-
+import { createDraftEmail } from "../../db/draftEmailRepository.js";
 
 const legacyTokenMap = {
   customerName: "customer.name",
@@ -27,6 +24,10 @@ const legacyTokenMap = {
   emailBody: "email.body",
   organizationName: "user.organization_name",
 };
+
+const getByPath = (obj, path) => String(path || "")
+  .split(".")
+  .reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), obj);
 
 const interpolateTemplate = (template, context) =>
   String(template || "").replace(/{{\s*([\w.]+)\s*}}/g, (_, token) => {
@@ -48,6 +49,29 @@ const resolveRecipient = (context) => {
   return candidates.find((value) => String(value || "").includes("@")) || "";
 };
 
+const extractInvoiceNumber = (text) => {
+  const value = String(text || "");
+  const regex = /invoice\s*(?:number|no\.?|#)?\s*[:\-]?\s*([A-Za-z0-9-]+)/i;
+  const match = value.match(regex);
+  return match?.[1] || "";
+};
+
+const validateMailTemplate = async ({ automation, userId }) => {
+  if (!automation.mail_template_id) {
+    throw new Error("Mail template is required for this automation action");
+  }
+
+  const template = await getMailTemplateById({ templateId: automation.mail_template_id, userId });
+  if (!template) throw new Error("Mail template not found");
+
+  const subject = String(template.subject || "").trim();
+  const body = String(template.body || "").trim();
+  if (!subject) throw new Error("Mail template subject is empty");
+  if (!body) throw new Error("Mail template body is empty");
+
+  return { template, subject, body };
+};
+
 const resolveInvoiceDetails = async ({ automation, userId, context }) => {
   const invoiceRelated = automation.trigger_type === "Invoice" || automation.action_type === "Invoice";
   if (!invoiceRelated) return null;
@@ -65,21 +89,8 @@ const resolveInvoiceDetails = async ({ automation, userId, context }) => {
   return invoice;
 };
 
-const executeMailLikeAction = async ({ automation, userId, context, mode }) => {
-  if (!automation.mail_template_id) {
-    throw new Error("Mail template is required for mail automation action");
-  }
-
-  const template = await getMailTemplateById({ templateId: automation.mail_template_id, userId });
-  if (!template) {
-    throw new Error("Mail template not found");
-  }
-
-  const templateSubject = String(template.subject || "").trim();
-  const templateBody = String(template.body || "").trim();
-
-  if (!templateSubject) throw new Error("Mail template subject is empty");
-  if (!templateBody) throw new Error("Mail template body is empty");
+const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOverride = null }) => {
+  const { subject: templateSubject, body: templateBody } = await validateMailTemplate({ automation, userId });
 
   const invoice = await resolveInvoiceDetails({ automation, userId, context });
   const renderContext = {
@@ -97,28 +108,104 @@ const executeMailLikeAction = async ({ automation, userId, context, mode }) => {
 
   const subject = interpolateTemplate(templateSubject, renderContext);
   const baseBody = interpolateTemplate(templateBody, renderContext);
-
-  const generatedBody = mode.startsWith("AI Generate")
-    ? await generateAutomationContent({ mode, templateBody: baseBody, context: renderContext })
-    : baseBody;
+  const finalBodyText = bodyTextOverride ? `${baseBody}\n\n${bodyTextOverride}` : baseBody;
 
   const recipient = resolveRecipient(renderContext);
-  if (!recipient) {
-    throw new Error("No recipient email could be resolved for automation");
-  }
+  if (!recipient) throw new Error("No recipient email could be resolved for automation");
 
   const html = buildAutomationEmailLayout({
     companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Auto-X",
-    bodyHtml: toParagraphHtml(generatedBody),
+    bodyHtml: toParagraphHtml(finalBodyText),
     invoice,
   });
 
   await sendBasicEmail({
     to: recipient,
     subject,
-    text: generatedBody,
+    text: finalBodyText,
     html,
   });
+
+  return { to: recipient, subject, body: finalBodyText, mode: "sent" };
+};
+
+const executeAiForEmailReceived = async ({ automation, userId, context, asDraft }) => {
+  const incoming = {
+    from: String(context?.email?.from || "").trim(),
+    subject: String(context?.email?.subject || "").trim(),
+    body: String(context?.email?.body || "").trim(),
+    attachments: Array.isArray(context?.email?.attachments) ? context.email.attachments : [],
+  };
+
+  const classification = await classifyIncomingEmail({ body: incoming.body });
+
+  const relevantData = { classification };
+
+  if (classification === "Invoice") {
+    const invoiceNumber = extractInvoiceNumber(`${incoming.subject}\n${incoming.body}`);
+    if (invoiceNumber) {
+      const invoice = await getInvoiceByNumberForUser({ userId, invoiceNumber });
+      if (invoice) {
+        const invoiceDetails = await getInvoiceWithCustomerByIdForAutomation({ userId, invoiceId: invoice.id });
+        if (invoiceDetails) {
+          relevantData.invoice = invoiceDetails;
+          relevantData.customer = {
+            name: invoiceDetails.customer_name,
+            email: invoiceDetails.customer_email,
+            contact: invoiceDetails.customer_contact,
+          };
+        }
+      }
+    }
+  } else {
+    const customer = await getCustomerByEmail({ userId, email: incoming.from });
+    if (customer) {
+      relevantData.customer = customer;
+      const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
+      if (invoice) relevantData.invoice = invoice;
+    }
+  }
+
+  const aiResponse = await generateAutomationContent({
+    incomingEmailBody: incoming.body,
+    relevantData,
+  });
+
+  const actionResult = await executeTemplateMailSend({
+    automation,
+    userId,
+    context: {
+      ...context,
+      email: incoming,
+      customer: relevantData.customer || context?.customer,
+      invoice: relevantData.invoice || context?.invoice,
+    },
+    bodyTextOverride: aiResponse,
+  });
+
+  if (!asDraft) {
+    return {
+      ...actionResult,
+      classification,
+      aiResponse,
+      mode: "sent",
+    };
+  }
+
+  const draft = await createDraftEmail({
+    userId,
+    automationId: automation.id,
+    to: actionResult.to,
+    subject: actionResult.subject,
+    body: actionResult.body,
+  });
+
+  return {
+    mode: "draft",
+    classification,
+    aiResponse,
+    draft,
+  };
 };
 
 const executeCrmUpsert = async ({ userId, context }) => {
@@ -191,21 +278,53 @@ export const executeAutomationAction = async ({ automation, context }) => {
   const userId = automation.user_id;
 
   if (automation.action_type === "Send Mail") {
-    await executeMailLikeAction({ automation, userId, context, mode: "Send Mail" });
-    return;
+    return executeTemplateMailSend({ automation, userId, context });
   }
 
-  if (automation.action_type === "AI Generate (Auto Reply)" || automation.action_type === "AI Generate (Draft)") {
-    await executeMailLikeAction({ automation, userId, context, mode: automation.action_type });
-    return;
+  if (automation.action_type === "AI Generate (Auto Send)" || automation.action_type === "AI Generate (Auto Reply)") {
+    if (automation.trigger_type === "Email Received") {
+      return executeAiForEmailReceived({ automation, userId, context, asDraft: false });
+    }
+
+    const aiResponse = await generateAutomationContent({
+      incomingEmailBody: String(context?.email?.body || ""),
+      relevantData: { context },
+    });
+
+    return executeTemplateMailSend({ automation, userId, context, bodyTextOverride: aiResponse });
+  }
+
+  if (automation.action_type === "AI Generate (Draft)") {
+    if (automation.trigger_type === "Email Received") {
+      return executeAiForEmailReceived({ automation, userId, context, asDraft: true });
+    }
+
+    const aiResponse = await generateAutomationContent({
+      incomingEmailBody: String(context?.email?.body || ""),
+      relevantData: { context },
+    });
+
+    const preview = await renderTemplateEmail({ automation, userId, context, bodyTextOverride: aiResponse });
+    const draft = await createDraftEmail({
+      userId,
+      automationId: automation.id,
+      to: preview.to,
+      subject: preview.subject,
+      body: preview.body,
+    });
+
+    return { mode: "draft", draft, aiResponse };
   }
 
   if (automation.action_type === "CRM" && automation.action_sub_type === "Upsert CRM") {
     await executeCrmUpsert({ userId, context });
-    return;
+    return { mode: "crm_upsert" };
   }
 
   if (automation.action_type === "Invoice" && automation.action_sub_type === "Upsert Invoice") {
     await executeInvoiceUpsert({ userId, context });
+    return { mode: "invoice_upsert" };
   }
+
+  return null;
 };
