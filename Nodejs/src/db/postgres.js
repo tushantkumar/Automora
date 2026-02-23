@@ -164,6 +164,7 @@ export const initDatabase = async () => {
       snippet TEXT NOT NULL DEFAULT '',
       category TEXT,
       confidence_score NUMERIC(5,4),
+      replied_at TIMESTAMPTZ,
       received_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -173,6 +174,7 @@ export const initDatabase = async () => {
 
   await pool.query(`ALTER TABLE auth_inbox_emails ADD COLUMN IF NOT EXISTS category TEXT;`);
   await pool.query(`ALTER TABLE auth_inbox_emails ADD COLUMN IF NOT EXISTS confidence_score NUMERIC(5,4);`);
+  await pool.query(`ALTER TABLE auth_inbox_emails ADD COLUMN IF NOT EXISTS replied_at TIMESTAMPTZ;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS auth_automations (

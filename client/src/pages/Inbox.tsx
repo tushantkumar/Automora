@@ -33,6 +33,7 @@ type InboxEmail = {
   snippet: string;
   category?: EmailCategory | null;
   confidence_score?: number | null;
+  replied_at?: string | null;
   received_at?: string;
 };
 
@@ -349,8 +350,8 @@ export default function Inbox() {
                   </div>
 
                   <div className="flex gap-3">
-                    <Button className="bg-primary hover:bg-primary/90 text-white shadow-md shadow-primary/20" onClick={() => { void sendReply(); }} disabled={sendingReply}>
-                      <CornerUpLeft className="w-4 h-4 mr-2" /> {sendingReply ? "Sending..." : "Send Reply"}
+                    <Button className="bg-primary hover:bg-primary/90 text-white shadow-md shadow-primary/20" onClick={() => { void sendReply(); }} disabled={sendingReply || Boolean(selectedEmail?.replied_at)}>
+                      <CornerUpLeft className="w-4 h-4 mr-2" /> {selectedEmail?.replied_at ? "Already Replied" : (sendingReply ? "Sending..." : "Send Reply") }
                     </Button>
                     <Button variant="outline" className="bg-background" onClick={() => { void generateAiReply(); }} disabled={generatingReply}>
                       {generatingReply ? "Generating..." : "Generate AI Reply"}

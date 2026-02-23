@@ -103,9 +103,39 @@ export const updateInboxEmailClassification = async ({ userId, provider, externa
   return result.rowCount > 0;
 };
 
+
+export const getInboxEmailByExternalId = async ({ userId, provider, externalId }) => {
+  const result = await pool.query(
+    `SELECT id, user_id, provider, external_id, from_name, from_email, subject, snippet, category, confidence_score::float8 AS confidence_score, replied_at, received_at, created_at, updated_at
+     FROM auth_inbox_emails
+     WHERE user_id = $1
+       AND provider = $2
+       AND external_id = $3
+     LIMIT 1`,
+    [userId, provider, externalId],
+  );
+
+  return result.rows[0] ?? null;
+};
+
+export const markInboxEmailReplied = async ({ userId, provider, externalId }) => {
+  const result = await pool.query(
+    `UPDATE auth_inbox_emails
+     SET replied_at = NOW(),
+         updated_at = NOW()
+     WHERE user_id = $1
+       AND provider = $2
+       AND external_id = $3
+       AND replied_at IS NULL`,
+    [userId, provider, externalId],
+  );
+
+  return result.rowCount > 0;
+};
+
 export const listInboxEmailsByUserId = async ({ userId, search = "", category = "" }) => {
   const result = await pool.query(
-    `SELECT id, provider, external_id, from_name, from_email, subject, snippet, category, confidence_score::float8 AS confidence_score, received_at, created_at, updated_at
+    `SELECT id, provider, external_id, from_name, from_email, subject, snippet, category, confidence_score::float8 AS confidence_score, replied_at, received_at, created_at, updated_at
      FROM auth_inbox_emails
      WHERE user_id = $1
        AND ($2::text = '' OR subject ILIKE '%' || $2 || '%' OR from_name ILIKE '%' || $2 || '%' OR from_email ILIKE '%' || $2 || '%')

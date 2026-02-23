@@ -4,7 +4,9 @@ import {
   getEmailIntegrationByProvider,
   deleteEmailIntegrationByProvider,
   listEmailIntegrationsByUserId,
+  getInboxEmailByExternalId,
   listInboxEmailsByUserId,
+  markInboxEmailReplied,
   updateInboxEmailClassification,
   upsertEmailIntegration,
   upsertInboxEmails,
@@ -518,6 +520,22 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     return { status: 400, body: { message: "Recipient and message body are required" } };
   }
 
+  if (replyToExternalId) {
+    const inboxEmail = await getInboxEmailByExternalId({
+      userId: user.id,
+      provider: "gmail",
+      externalId: replyToExternalId,
+    });
+
+    if (!inboxEmail) {
+      return { status: 404, body: { message: "Original inbox email not found" } };
+    }
+
+    if (inboxEmail.replied_at) {
+      return { status: 409, body: { message: "Reply already sent for this email" } };
+    }
+  }
+
   try {
     const replyContext = await fetchGmailReplyContext({
       accessToken: integration.access_token,
@@ -546,6 +564,14 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     if (!response.ok) {
       const message = data?.error?.message || "Unable to send email via Gmail";
       return { status: 502, body: { message } };
+    }
+
+    if (replyToExternalId) {
+      await markInboxEmailReplied({
+        userId: user.id,
+        provider: "gmail",
+        externalId: replyToExternalId,
+      });
     }
 
     return {
