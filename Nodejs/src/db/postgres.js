@@ -212,6 +212,47 @@ export const initDatabase = async () => {
   EXCEPTION
     WHEN duplicate_object THEN NULL;
   END $$;`);
+  await pool.query(`
+    INSERT INTO auth_mail_templates (id, user_id, name, subject, body)
+    SELECT
+      md5(u.id || '-seed-template'),
+      u.id,
+      'Seed Invoice Reminder',
+      'Invoice {{invoice.invoice_number}} due soon',
+      'Hello {{customer.name}}, your invoice {{invoice.invoice_number}} is due on {{invoice.due_date}}.'
+    FROM auth_users u
+    WHERE u.is_verified = TRUE
+      AND NOT EXISTS (
+        SELECT 1 FROM auth_mail_templates t
+        WHERE t.user_id = u.id
+          AND t.name = 'Seed Invoice Reminder'
+      );
+  `);
+
+  await pool.query(`
+    INSERT INTO auth_automations (
+      id, user_id, name, trigger_type, sub_trigger, condition_logic, conditions, action_type, action_sub_type, mail_template_id, is_active
+    )
+    SELECT
+      md5(u.id || '-seed-automation'),
+      u.id,
+      'Seed Day Before Overdue Reminder',
+      'Invoice',
+      'Day Before Overdue',
+      'AND',
+      '[{"entity":"invoice","field":"status","operator":"not equals","value":"Paid"}]'::jsonb,
+      'Send Mail',
+      NULL,
+      md5(u.id || '-seed-template'),
+      TRUE
+    FROM auth_users u
+    WHERE u.is_verified = TRUE
+      AND NOT EXISTS (
+        SELECT 1 FROM auth_automations a
+        WHERE a.user_id = u.id
+          AND a.name = 'Seed Day Before Overdue Reminder'
+      );
+  `);
 
 };
 

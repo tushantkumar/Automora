@@ -7,6 +7,7 @@ import {
 } from "../db/customerRepository.js";
 import { createUserId, normalizeEmail } from "../utils/auth.js";
 import { countInvoicesByCustomerId } from "../db/invoiceRepository.js";
+import { runAutomations } from "./automation/executionEngine.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -49,7 +50,10 @@ export const createCustomerForUser = async (authHeader, payload) => {
     ...data,
   });
 
-  const workflowResult = null;
+  await runAutomations({
+    triggerType: "Customer",
+    context: { customer, user },
+  });
 
   return {
     status: 201,
@@ -76,6 +80,11 @@ export const updateCustomerForUser = async (authHeader, customerId, payload) => 
   });
 
   if (!customer) return { status: 404, body: { message: "customer not found" } };
+
+  await runAutomations({
+    triggerType: "Customer",
+    context: { customer, user },
+  });
 
   return { status: 200, body: { message: "customer updated", customer } };
 };
