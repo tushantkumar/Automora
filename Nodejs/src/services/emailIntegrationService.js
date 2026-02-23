@@ -16,8 +16,6 @@ import {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
   GOOGLE_REDIRECT_URI,
-  OPENROUTER_API_KEY,
-  OPENROUTER_MODEL,
   OLLAMA_BASE_URL,
   OLLAMA_MODEL,
 } from "../config/constants.js";
@@ -609,43 +607,39 @@ export const getInboxAiReply = async (authHeader, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
-  if (!OPENROUTER_API_KEY) {
-    return { status: 400, body: { message: "OpenRouter API key is not configured" } };
-  }
-
   const inputText = String(payload.inputText || "").trim();
   if (!inputText) {
     return { status: 400, body: { message: "inputText is required" } };
   }
 
-  const requestPayload = {
-    model: OPENROUTER_MODEL,
-    messages: [{ role: "user", content: inputText }],
-    reasoning: { enabled: true },
-  };
+  const prompt = `You are a professional email assistant.
+Write a concise, polite business reply to the following context.
+
+${inputText}`;
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestPayload),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt,
+        stream: false,
+      }),
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      return { status: response.status, body: { message: data?.error?.message || "OpenRouter request failed" } };
+      return { status: response.status, body: { message: data?.error || "Ollama request failed" } };
     }
 
-    const content = String(data?.choices?.[0]?.message?.content || "").trim();
+    const content = String(data?.response || "").trim();
     if (!content) {
       return { status: 502, body: { message: "Empty AI response" } };
     }
 
     return { status: 200, body: { reply: content } };
   } catch {
-    return { status: 502, body: { message: "Error fetching from OpenRouter API" } };
+    return { status: 502, body: { message: "Error fetching from Ollama" } };
   }
 };
