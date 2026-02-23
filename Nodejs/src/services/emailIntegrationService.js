@@ -64,7 +64,7 @@ const processedIncomingEmailIds = new Set();
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
-const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "" }) => {
+const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "", provider = "gmail" }) => {
   const rows = Array.isArray(emails) ? emails : [];
   const normalizedOwnerEmail = normalizeEmail(ownerEmail || user?.email || "");
   const executionResults = [];
@@ -98,7 +98,16 @@ const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "
       },
     });
 
-    executionResults.push({ externalId, results });
+    const hasSentReply = (Array.isArray(results) ? results : []).some((item) => String(item?.result?.mode || "").toLowerCase() === "sent");
+    if (hasSentReply) {
+      await markInboxEmailReplied({
+        userId: user.id,
+        provider,
+        externalId,
+      });
+    }
+
+    executionResults.push({ externalId, results, hasSentReply });
   }
 
   return executionResults;
@@ -296,7 +305,7 @@ export const handleGmailCallback = async ({ code, state }) => {
   const emails = await fetchGmailMessages(tokenData.access_token, 50);
   const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
   await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-  await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: profile?.emailAddress || "" });
+  await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: profile?.emailAddress || "", provider: "gmail" });
 
   return {
     status: 200,
@@ -320,7 +329,7 @@ export const syncGmailEmails = async (authHeader) => {
     const emails = await fetchGmailMessages(integration.access_token, 50);
     const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
     await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-    await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: integration.connected_email || "" });
+    await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: integration.connected_email || "", provider: "gmail" });
 
     return { status: 200, body: { message: "Emails synced", syncedEmails: normalizedEmails.length } };
   } catch {
