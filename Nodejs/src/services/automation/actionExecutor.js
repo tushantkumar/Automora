@@ -40,10 +40,10 @@ const toParagraphHtml = (text) => `<p style="margin:0 0 16px;">${String(text || 
 
 const resolveRecipient = (context) => {
   const candidates = [
+    context?.email?.from,
     context?.customer?.email,
     context?.invoice?.customer_email,
     context?.invoice?.customerEmail,
-    context?.email?.from,
   ];
 
   return candidates.find((value) => String(value || "").includes("@")) || "";
@@ -74,19 +74,22 @@ const validateMailTemplate = async ({ automation, userId }) => {
 
 const resolveInvoiceDetails = async ({ automation, userId, context }) => {
   const invoiceRelated = automation.trigger_type === "Invoice" || automation.action_type === "Invoice";
-  if (!invoiceRelated) return null;
-
   const invoiceId = String(context?.invoice?.id || "").trim();
-  if (!invoiceId) {
+
+  if (invoiceId) {
+    const invoice = await getInvoiceWithCustomerByIdForAutomation({ userId, invoiceId });
+    if (invoice) return invoice;
+  }
+
+  if (context?.invoice) {
+    return context.invoice;
+  }
+
+  if (invoiceRelated) {
     throw new Error("Invoice email requires invoice context");
   }
 
-  const invoice = await getInvoiceWithCustomerByIdForAutomation({ userId, invoiceId });
-  if (!invoice) {
-    throw new Error("Invoice not found for email automation");
-  }
-
-  return invoice;
+  return null;
 };
 
 const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverride = null }) => {
