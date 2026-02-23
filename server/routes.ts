@@ -1,16 +1,26 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { type Server } from "http";
+import { AutomationController } from "./modules/automation/automation.controller";
+import { AutomationRepository } from "./modules/automation/automation.repository";
+import { AutomationService } from "./modules/automation/automation.service";
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+  const repository = new AutomationRepository();
+  const service = new AutomationService(repository);
+  const controller = new AutomationController(service);
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  try {
+    await service.initialize();
+  } catch (error) {
+    console.error("Automation module database initialization failed", error);
+  }
+
+  app.get("/api/automations/metadata", controller.getMetadata);
+  app.get("/api/automations", controller.listAutomations);
+  app.post("/api/automations", controller.createAutomation);
 
   return httpServer;
 }

@@ -9,6 +9,7 @@ import {
   Settings,
   LogOut,
   Mails,
+  Bot,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
@@ -55,6 +56,7 @@ export function Sidebar() {
     { href: "/customers", label: "Customers", icon: Users },
     { href: "/invoices", label: "Invoices", icon: FileText },
     { href: "/mail-templates", label: "Mail Templates", icon: Mails },
+    { href: "/automation", label: "Automation", icon: Bot },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
 

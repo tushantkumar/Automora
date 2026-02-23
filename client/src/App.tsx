@@ -17,6 +17,7 @@ import Customers from "@/pages/Customers";
 import Invoices from "@/pages/Invoices";
 import Settings from "@/pages/Settings";
 import MailTemplates from "@/pages/MailTemplates";
+import Automation from "@/pages/Automation";
 
 const PUBLIC_ROUTES = new Set(["/", "/login", "/signup", "/verify-email", "/forgot-password", "/reset-password"]);
 
@@ -57,6 +58,7 @@ function Router() {
         <Route path="/customers" component={Customers} />
         <Route path="/invoices" component={Invoices} />
         <Route path="/mail-templates" component={MailTemplates} />
+        <Route path="/automation" component={Automation} />
         <Route path="/settings" component={Settings} />
         <Route component={NotFound} />
       </Switch>
