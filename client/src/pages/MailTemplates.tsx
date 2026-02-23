@@ -20,15 +20,39 @@ type MailTemplate = {
 type TemplateVariable = { label: string; token: string; source: "customer" | "invoice" | "inbox" | "system" };
 
 const templateVariables: TemplateVariable[] = [
-  { label: "Customer Name", token: "{{customerName}}", source: "customer" },
-  { label: "Customer Email", token: "{{customerEmail}}", source: "customer" },
-  { label: "Invoice Number", token: "{{invoiceNumber}}", source: "invoice" },
-  { label: "Invoice Status", token: "{{invoiceStatus}}", source: "invoice" },
-  { label: "Invoice Amount", token: "{{invoiceAmount}}", source: "invoice" },
-  { label: "Due Date", token: "{{dueDate}}", source: "invoice" },
-  { label: "Email Subject", token: "{{emailSubject}}", source: "inbox" },
-  { label: "Email Body", token: "{{emailBody}}", source: "inbox" },
-  { label: "Organization", token: "{{organizationName}}", source: "system" },
+  // Customer datapills
+  { label: "Customer ID", token: "{{customer.id}}", source: "customer" },
+  { label: "Customer Name", token: "{{customer.name}}", source: "customer" },
+  { label: "Customer Client", token: "{{customer.client}}", source: "customer" },
+  { label: "Customer Contact", token: "{{customer.contact}}", source: "customer" },
+  { label: "Customer Email", token: "{{customer.email}}", source: "customer" },
+  { label: "Customer Status", token: "{{customer.status}}", source: "customer" },
+  { label: "Customer Value", token: "{{customer.value}}", source: "customer" },
+  { label: "Customer Created At", token: "{{customer.created_at}}", source: "customer" },
+
+  // Invoice datapills
+  { label: "Invoice ID", token: "{{invoice.id}}", source: "invoice" },
+  { label: "Invoice Number", token: "{{invoice.invoice_number}}", source: "invoice" },
+  { label: "Invoice Client Name", token: "{{invoice.client_name}}", source: "invoice" },
+  { label: "Invoice Issue Date", token: "{{invoice.issue_date}}", source: "invoice" },
+  { label: "Invoice Due Date", token: "{{invoice.due_date}}", source: "invoice" },
+  { label: "Invoice Amount", token: "{{invoice.amount}}", source: "invoice" },
+  { label: "Invoice Tax Rate", token: "{{invoice.tax_rate}}", source: "invoice" },
+  { label: "Invoice Status", token: "{{invoice.status}}", source: "invoice" },
+  { label: "Invoice Notes", token: "{{invoice.notes}}", source: "invoice" },
+  { label: "Invoice Line Items", token: "{{invoice.line_items}}", source: "invoice" },
+  { label: "Invoice Created At", token: "{{invoice.created_at}}", source: "invoice" },
+
+  // Invoice linked customer datapills
+  { label: "Invoice Customer Name", token: "{{invoice.customer_name}}", source: "invoice" },
+  { label: "Invoice Customer Email", token: "{{invoice.customer_email}}", source: "invoice" },
+
+  // Inbox / system datapills
+  { label: "Email Subject", token: "{{email.subject}}", source: "inbox" },
+  { label: "Email Body", token: "{{email.body}}", source: "inbox" },
+  { label: "Email From", token: "{{email.from}}", source: "inbox" },
+  { label: "Organization", token: "{{user.organization_name}}", source: "system" },
+  { label: "User Name", token: "{{user.name}}", source: "system" },
 ];
 
 const sourceBadgeColor: Record<TemplateVariable["source"], string> = {
@@ -85,7 +109,7 @@ export default function MailTemplates() {
     setEditingTemplateId(null);
     setName("");
     setSubject("");
-    setBody("Hi {{customerName}},\n\nThank you for reaching out.\n\nRegards,\n{{organizationName}}");
+    setBody("Hi {{customer.name}},\n\nThank you for reaching out.\n\nRegards,\n{{user.organization_name}}");
     setShowForm(true);
   };
 

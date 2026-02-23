@@ -15,9 +15,23 @@ const getByPath = (obj, path) => String(path || "")
   .split(".")
   .reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), obj);
 
+
+const legacyTokenMap = {
+  customerName: "customer.name",
+  customerEmail: "customer.email",
+  invoiceNumber: "invoice.invoice_number",
+  invoiceStatus: "invoice.status",
+  invoiceAmount: "invoice.amount",
+  dueDate: "invoice.due_date",
+  emailSubject: "email.subject",
+  emailBody: "email.body",
+  organizationName: "user.organization_name",
+};
+
 const interpolateTemplate = (template, context) =>
   String(template || "").replace(/{{\s*([\w.]+)\s*}}/g, (_, token) => {
-    const value = getByPath(context, token);
+    const mapped = legacyTokenMap[token] || token;
+    const value = getByPath(context, mapped);
     return value == null ? "" : String(value);
   });
 

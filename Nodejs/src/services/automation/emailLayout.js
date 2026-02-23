@@ -18,6 +18,57 @@ const toCurrency = (value) => {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 };
 
+const parseLineItems = (lineItems) => {
+  if (Array.isArray(lineItems)) return lineItems;
+  if (typeof lineItems === "string") {
+    try {
+      const parsed = JSON.parse(lineItems);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const lineItemsSection = (invoice) => {
+  const items = parseLineItems(invoice?.line_items);
+  if (!items.length) return "";
+
+  const rows = items
+    .map((item) => {
+      const description = escapeHtml(item?.description || "-");
+      const quantity = escapeHtml(item?.quantity ?? "-");
+      const rate = escapeHtml(toCurrency(item?.rate));
+      const total = escapeHtml(toCurrency(Number(item?.quantity || 0) * Number(item?.rate || 0)));
+
+      return `
+        <tr>
+          <td style="padding:8px;border:1px solid #e2e8f0;background:#ffffff;">${description}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;background:#ffffff;text-align:right;">${quantity}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;background:#ffffff;text-align:right;">${rate}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;background:#ffffff;text-align:right;">${total}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `
+    <div style="margin-top:16px;">
+      <h4 style="margin:0 0 10px;color:#0f172a;font-size:14px;">Item Details</h4>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;color:#1e293b;">
+        <tr>
+          <th style="padding:8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:left;">Description</th>
+          <th style="padding:8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:right;">Qty</th>
+          <th style="padding:8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:right;">Rate</th>
+          <th style="padding:8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:right;">Total</th>
+        </tr>
+        ${rows}
+      </table>
+    </div>
+  `;
+};
+
 const invoiceSummarySection = (invoice) => {
   if (!invoice) return "";
 
@@ -26,20 +77,28 @@ const invoiceSummarySection = (invoice) => {
       <h3 style="margin:0 0 12px;color:#0f172a;font-size:16px;">Invoice Details</h3>
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:14px;color:#1e293b;">
         <tr>
-          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Invoice ID</td>
-          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(invoice.id)}</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Invoice Number</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(invoice.invoice_number || invoice.id)}</td>
         </tr>
         <tr>
-          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Amount</td>
-          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(toCurrency(invoice.amount))}</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Due Date</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(toFriendlyDate(invoice.due_date))}</td>
         </tr>
         <tr>
           <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Status</td>
           <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(invoice.status)}</td>
         </tr>
         <tr>
-          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Due Date</td>
-          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(toFriendlyDate(invoice.due_date))}</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Amount</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(toCurrency(invoice.amount))}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Tax</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(`${Number(invoice.tax_rate || 0).toFixed(2)}%`)}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Note</td>
+          <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(invoice.notes || "-")}</td>
         </tr>
         <tr>
           <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;font-weight:600;">Customer Name</td>
@@ -50,6 +109,7 @@ const invoiceSummarySection = (invoice) => {
           <td style="padding:10px;border:1px solid #e2e8f0;background:#ffffff;">${escapeHtml(invoice.customer_email || "-")}</td>
         </tr>
       </table>
+      ${lineItemsSection(invoice)}
     </div>
   `;
 };
