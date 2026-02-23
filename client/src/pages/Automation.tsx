@@ -101,7 +101,8 @@ const formSchema = z
     }
 
     const customerSub = value.subTrigger;
-    const requiresConditions = value.trigger === "Invoice" || (value.trigger === "Customer" && !["Created", "Create", "Deleted", "Delete"].includes(customerSub));
+    const customerNoConditionSubTriggers = ["Created", "Create", "Deleted", "Delete"];
+    const requiresConditions = value.trigger === "Invoice" || (value.trigger === "Customer" && !customerNoConditionSubTriggers.includes(customerSub));
     if (requiresConditions && value.conditions.length === 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["conditions"], message: "At least one condition is required" });
     }
@@ -164,6 +165,11 @@ export default function Automation() {
   const { fields, append, remove, update } = useFieldArray({ control: form.control, name: "conditions" });
   const trigger = form.watch("trigger");
   const action = form.watch("action");
+  const subTrigger = form.watch("subTrigger");
+
+  const shouldHideConditions =
+    trigger === "Email Received"
+    || (trigger === "Customer" && ["Created", "Create", "Deleted", "Delete"].includes(subTrigger));
 
   const fieldsByEntity = (entity: "customer" | "invoice") => metadata?.fields.filter((item) => item.entity === entity) || [];
 
@@ -250,12 +256,12 @@ export default function Automation() {
   }, [trigger, form]);
 
   useEffect(() => {
-    if (trigger === "Email Received") {
+    if (shouldHideConditions) {
       form.setValue("conditions", []);
     } else if (form.getValues("conditions").length === 0) {
       form.setValue("conditions", [{ entity: "customer", field: fieldsByEntity("customer")[0]?.key || "", operator: "equals", value: "", secondaryValue: "", joiner: "AND" }]);
     }
-  }, [trigger, form, metadata]);
+  }, [shouldHideConditions, form, metadata]);
 
   const submitForm = form.handleSubmit(async (values) => {
     try {
@@ -283,7 +289,7 @@ export default function Automation() {
         subTrigger: ["Customer", "Invoice"].includes(values.trigger) ? values.subTrigger : undefined,
         subAction: values.action === "CRM" ? "Upsert CRM" : values.action === "Invoice" ? "Upsert Invoice" : undefined,
         mailTemplateId: ["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(values.action) ? values.mailTemplateId : undefined,
-        conditions: values.trigger === "Email Received" ? [] : normalizedConditions,
+        conditions: shouldHideConditions ? [] : normalizedConditions,
       };
 
       if (editing) {
@@ -404,7 +410,7 @@ export default function Automation() {
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Automation" : "Create Automation"}</DialogTitle>
-            <DialogDescription>Configure basic info, conditions, and actions.</DialogDescription>
+            <DialogDescription>Configure basic info and actions. Conditions appear only when applicable.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5">
@@ -447,7 +453,7 @@ export default function Automation() {
               </div>
             </div>
 
-            {trigger !== "Email Received" && (
+            {!shouldHideConditions && (
               <div className="space-y-3">
                 <h3 className="font-semibold">2. Conditions</h3>
                 <div>

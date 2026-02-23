@@ -110,7 +110,12 @@ const validateAndNormalizePayload = async ({ userId, payload, excludeAutomationI
   const actionSubType = payload?.subAction ? String(payload.subAction).trim() : null;
   const mailTemplateId = payload?.mailTemplateId ? String(payload.mailTemplateId).trim() : null;
   const conditions = Array.isArray(payload?.conditions) ? payload.conditions : [];
-  const normalizedConditions = triggerType === "Email Received" ? [] : conditions;
+  const customerSub = payload?.subTrigger ? String(payload.subTrigger).trim() : "";
+  const customerNoConditionSubTriggers = ["Created", "Create", "Deleted", "Delete"];
+  const normalizedConditions = (triggerType === "Email Received"
+    || (triggerType === "Customer" && customerNoConditionSubTriggers.includes(customerSub)))
+    ? []
+    : conditions;
   const isActive = payload?.isActive !== false;
 
   if (!name || !ALLOWED_TRIGGERS.includes(triggerType) || !ALLOWED_ACTIONS.includes(actionType)) {
