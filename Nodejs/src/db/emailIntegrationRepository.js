@@ -87,14 +87,61 @@ export const upsertInboxEmails = async ({ userId, provider, emails }) => {
   return upserted;
 };
 
-export const listInboxEmailsByUserId = async ({ userId, search = "" }) => {
+
+export const updateInboxEmailClassification = async ({ userId, provider, externalId, category, confidenceScore }) => {
   const result = await pool.query(
-    `SELECT id, provider, external_id, from_name, from_email, subject, snippet, received_at, created_at, updated_at
+    `UPDATE auth_inbox_emails
+     SET category = $1,
+         confidence_score = $2,
+         updated_at = NOW()
+     WHERE user_id = $3
+       AND provider = $4
+       AND external_id = $5`,
+    [category, confidenceScore, userId, provider, externalId],
+  );
+
+  return result.rowCount > 0;
+};
+
+
+export const getInboxEmailByExternalId = async ({ userId, provider, externalId }) => {
+  const result = await pool.query(
+    `SELECT id, user_id, provider, external_id, from_name, from_email, subject, snippet, category, confidence_score::float8 AS confidence_score, replied_at, received_at, created_at, updated_at
+     FROM auth_inbox_emails
+     WHERE user_id = $1
+       AND provider = $2
+       AND external_id = $3
+     LIMIT 1`,
+    [userId, provider, externalId],
+  );
+
+  return result.rows[0] ?? null;
+};
+
+export const markInboxEmailReplied = async ({ userId, provider, externalId }) => {
+  const result = await pool.query(
+    `UPDATE auth_inbox_emails
+     SET replied_at = NOW(),
+         updated_at = NOW()
+     WHERE user_id = $1
+       AND provider = $2
+       AND external_id = $3
+       AND replied_at IS NULL`,
+    [userId, provider, externalId],
+  );
+
+  return result.rowCount > 0;
+};
+
+export const listInboxEmailsByUserId = async ({ userId, search = "", category = "" }) => {
+  const result = await pool.query(
+    `SELECT id, provider, external_id, from_name, from_email, subject, snippet, category, confidence_score::float8 AS confidence_score, replied_at, received_at, created_at, updated_at
      FROM auth_inbox_emails
      WHERE user_id = $1
        AND ($2::text = '' OR subject ILIKE '%' || $2 || '%' OR from_name ILIKE '%' || $2 || '%' OR from_email ILIKE '%' || $2 || '%')
+       AND ($3::text = '' OR UPPER(COALESCE(category, '')) = UPPER($3))
      ORDER BY received_at DESC, created_at DESC`,
-    [userId, search],
+    [userId, search, category],
   );
 
   return result.rows;

@@ -4,16 +4,20 @@ import {
   getEmailIntegrationByProvider,
   deleteEmailIntegrationByProvider,
   listEmailIntegrationsByUserId,
+  getInboxEmailByExternalId,
   listInboxEmailsByUserId,
+  markInboxEmailReplied,
+  updateInboxEmailClassification,
   upsertEmailIntegration,
   upsertInboxEmails,
 } from "../db/emailIntegrationRepository.js";
+import { runAutomations } from "./automation/executionEngine.js";
 import {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
   GOOGLE_REDIRECT_URI,
-  OPENROUTER_API_KEY,
-  OPENROUTER_MODEL,
+  OLLAMA_BASE_URL,
+  OLLAMA_MODEL,
 } from "../config/constants.js";
 
 const GMAIL_SCOPES = [
@@ -60,16 +64,88 @@ const processedIncomingEmailIds = new Set();
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
-const classifyEmailFilter = ({ subject, snippet }) => {
-  const text = `${String(subject || "")} ${String(snippet || "")}`.toLowerCase();
-  if (/\b(invoice|bill|billing)\b/.test(text)) return "invoice_request";
-  if (/support|issue|bug|error|help/.test(text)) return "support_ticket";
-  return "any";
+const EMAIL_CATEGORIES = ["INVOICE", "QUERY", "SUPPORT", "CUSTOMER", "OTHER"];
+
+const classifyEmailWithOllama = async (emailBody) => {
+  const prompt = `You are an email classification assistant.
+
+Classify this email into ONE of the following:
+- INVOICE
+- QUERY
+- SUPPORT
+- CUSTOMER
+- OTHER
+
+Return ONLY the category name.
+Also return confidence percentage.
+
+Email Content:
+${String(emailBody || "")}
+
+Return JSON:
+{
+  "category": "...",
+  "confidence": 0.92
+}`;
+
+  const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt,
+      stream: false,
+      format: "json",
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || "Ollama classification failed");
+  }
+
+  const raw = String(data?.response || "").trim();
+  const parsed = JSON.parse(raw || "{}");
+  const category = String(parsed?.category || "").trim().toUpperCase();
+  const confidenceRaw = Number(parsed?.confidence);
+  const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0;
+
+  return {
+    category: EMAIL_CATEGORIES.includes(category) ? category : "OTHER",
+    confidence,
+  };
+};
+
+const classifyAndPersistInboxEmails = async ({ userId, provider, emails }) => {
+  for (const email of Array.isArray(emails) ? emails : []) {
+    const externalId = String(email?.externalId || "").trim();
+    if (!externalId) continue;
+
+    try {
+      const classification = await classifyEmailWithOllama(String(email?.snippet || ""));
+      await updateInboxEmailClassification({
+        userId,
+        provider,
+        externalId,
+        category: classification.category,
+        confidenceScore: classification.confidence,
+      });
+    } catch {
+      await updateInboxEmailClassification({
+        userId,
+        provider,
+        externalId,
+        category: "OTHER",
+        confidenceScore: 0,
+      });
+    }
+  }
 };
 
 const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "" }) => {
   const rows = Array.isArray(emails) ? emails : [];
   const normalizedOwnerEmail = normalizeEmail(ownerEmail || user?.email || "");
+  const executionResults = [];
 
   for (const email of rows) {
     const externalId = String(email?.externalId || "").trim();
@@ -83,25 +159,27 @@ const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "
       if (first) processedIncomingEmailIds.delete(first);
     }
 
-    const emailFilter = classifyEmailFilter({ subject: email?.subject, snippet: email?.snippet });
     const messageBody = String(email?.snippet || "");
 
-    await processWorkflowEventForUserContext(user, {
-      triggerType: "email_received",
-      emailFilter,
-      eventPayload: {
-        eventType: "email_received",
-        customerName: String(email?.fromName || email?.fromEmail || "Customer"),
-        customerEmail: String(email?.fromEmail || "").trim(),
-        emailSubject: String(email?.subject || "(no subject)"),
-        messageBody,
-        emailBody: messageBody,
-        body: messageBody,
-        externalEmailId: externalId,
-        organizationName: user.organization_name || "",
+    const results = await runAutomations({
+      triggerType: "Email Received",
+      context: {
+        user,
+        email: {
+          from: String(email?.fromEmail || "").trim(),
+          subject: String(email?.subject || "(no subject)"),
+          body: messageBody,
+          attachments: [],
+          externalId,
+          fromName: String(email?.fromName || ""),
+        },
       },
     });
+
+    executionResults.push({ externalId, results });
   }
+
+  return executionResults;
 };
 const buildGmailAuthUrl = ({ token }) => {
   const params = new URLSearchParams({
@@ -296,6 +374,7 @@ export const handleGmailCallback = async ({ code, state }) => {
   const emails = await fetchGmailMessages(tokenData.access_token, 50);
   const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
   await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
+  await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
   await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: profile?.emailAddress || "" });
 
   return {
@@ -320,6 +399,7 @@ export const syncGmailEmails = async (authHeader) => {
     const emails = await fetchGmailMessages(integration.access_token, 50);
     const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
     await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
+    await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
     await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: integration.connected_email || "" });
 
     return { status: 200, body: { message: "Emails synced", syncedEmails: normalizedEmails.length } };
@@ -332,12 +412,14 @@ export const getInboxEmails = async (authHeader, query = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
+  const category = String(query.category || "").trim().toUpperCase();
   const emails = await listInboxEmailsByUserId({
     userId: user.id,
     search: String(query.search || "").trim(),
+    category: EMAIL_CATEGORIES.includes(category) ? category : "",
   });
 
-  return { status: 200, body: { emails } };
+  return { status: 200, body: { emails, categories: EMAIL_CATEGORIES } };
 };
 
 const encodeBase64Url = (value) =>
@@ -436,6 +518,22 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     return { status: 400, body: { message: "Recipient and message body are required" } };
   }
 
+  if (replyToExternalId) {
+    const inboxEmail = await getInboxEmailByExternalId({
+      userId: user.id,
+      provider: "gmail",
+      externalId: replyToExternalId,
+    });
+
+    if (!inboxEmail) {
+      return { status: 404, body: { message: "Original inbox email not found" } };
+    }
+
+    if (inboxEmail.replied_at) {
+      return { status: 409, body: { message: "Reply already sent for this email" } };
+    }
+  }
+
   try {
     const replyContext = await fetchGmailReplyContext({
       accessToken: integration.access_token,
@@ -464,6 +562,14 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     if (!response.ok) {
       const message = data?.error?.message || "Unable to send email via Gmail";
       return { status: 502, body: { message } };
+    }
+
+    if (replyToExternalId) {
+      await markInboxEmailReplied({
+        userId: user.id,
+        provider: "gmail",
+        externalId: replyToExternalId,
+      });
     }
 
     return {
@@ -501,43 +607,39 @@ export const getInboxAiReply = async (authHeader, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
-  if (!OPENROUTER_API_KEY) {
-    return { status: 400, body: { message: "OpenRouter API key is not configured" } };
-  }
-
   const inputText = String(payload.inputText || "").trim();
   if (!inputText) {
     return { status: 400, body: { message: "inputText is required" } };
   }
 
-  const requestPayload = {
-    model: OPENROUTER_MODEL,
-    messages: [{ role: "user", content: inputText }],
-    reasoning: { enabled: true },
-  };
+  const prompt = `You are a professional email assistant.
+Write a concise, polite business reply to the following context.
+
+${inputText}`;
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestPayload),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt,
+        stream: false,
+      }),
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      return { status: response.status, body: { message: data?.error?.message || "OpenRouter request failed" } };
+      return { status: response.status, body: { message: data?.error || "Ollama request failed" } };
     }
 
-    const content = String(data?.choices?.[0]?.message?.content || "").trim();
+    const content = String(data?.response || "").trim();
     if (!content) {
       return { status: 502, body: { message: "Empty AI response" } };
     }
 
     return { status: 200, body: { reply: content } };
   } catch {
-    return { status: 502, body: { message: "Error fetching from OpenRouter API" } };
+    return { status: 502, body: { message: "Error fetching from Ollama" } };
   }
 };

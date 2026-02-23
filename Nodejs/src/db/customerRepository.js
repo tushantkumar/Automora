@@ -25,6 +25,20 @@ export const listCustomersByUserId = async (userId) => {
   return result.rows;
 };
 
+
+export const getCustomerByEmail = async ({ userId, email }) => {
+  const result = await pool.query(
+    `SELECT ${CUSTOMER_SELECT}
+     FROM auth_customers
+     WHERE user_id = $1
+       AND LOWER(email) = LOWER($2)
+     LIMIT 1`,
+    [userId, email],
+  );
+
+  return result.rows[0] ?? null;
+};
+
 export const getCustomerById = async ({ customerId, userId }) => {
   const result = await pool.query(
     `SELECT ${CUSTOMER_SELECT}

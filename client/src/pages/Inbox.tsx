@@ -15,8 +15,13 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { axios } from "@/lib/axios";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
+
+type EmailCategory = "INVOICE" | "QUERY" | "SUPPORT" | "CUSTOMER" | "OTHER";
+
+const CATEGORY_TABS: EmailCategory[] = ["INVOICE", "QUERY", "SUPPORT", "CUSTOMER", "OTHER"];
 
 type InboxEmail = {
   id: string;
@@ -26,6 +31,9 @@ type InboxEmail = {
   external_id?: string;
   subject: string;
   snippet: string;
+  category?: EmailCategory | null;
+  confidence_score?: number | null;
+  replied_at?: string | null;
   received_at?: string;
 };
 
@@ -47,6 +55,7 @@ export default function Inbox() {
   const [emails, setEmails] = useState<InboxEmail[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<InboxEmail | null>(null);
   const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<EmailCategory>("INVOICE");
   const [draftReply, setDraftReply] = useState("Thanks for your email. We received it and will get back to you shortly.");
   const [sendingReply, setSendingReply] = useState(false);
   const [generatingReply, setGeneratingReply] = useState(false);
@@ -65,17 +74,14 @@ export default function Inbox() {
     try {
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
-      const response = await fetch(`${AUTH_API_URL}/emails${params.toString() ? `?${params.toString()}` : ""}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
+      params.set("category", selectedCategory);
 
-      if (!response.ok) {
-        toast({ title: "Unable to load inbox emails.", description: data?.message || "Please try again." });
-        return;
-      }
+      const response = await axios.get<{ emails: InboxEmail[] }>(
+        `${AUTH_API_URL}/emails${params.toString() ? `?${params.toString()}` : ""}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
 
-      const rows = Array.isArray(data?.emails) ? data.emails : [];
+      const rows = Array.isArray(response.data?.emails) ? response.data.emails : [];
       setEmails(rows);
       setSelectedEmail((prev) => {
         if (emailIdFromQuery) {
@@ -85,14 +91,14 @@ export default function Inbox() {
 
         return prev && rows.some((row: InboxEmail) => row.id === prev.id) ? prev : rows[0] || null;
       });
-    } catch {
-      toast({ title: "Unable to load inbox emails.", description: "Please try again." });
+    } catch (error) {
+      toast({ title: "Unable to load inbox emails.", description: (error as Error).message || "Please try again." });
     }
   };
 
   useEffect(() => {
     void loadEmails();
-  }, [search, emailIdFromQuery]);
+  }, [search, selectedCategory, emailIdFromQuery]);
 
   const loadThread = async (externalId: string) => {
     if (!token || !externalId) {
@@ -102,16 +108,11 @@ export default function Inbox() {
 
     setLoadingThread(true);
     try {
-      const response = await fetch(`${AUTH_API_URL}/emails/thread/${encodeURIComponent(externalId)}`, {
+      const response = await axios.get<{ messages: ThreadMessage[] }>(`${AUTH_API_URL}/emails/thread/${encodeURIComponent(externalId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
-      if (!response.ok) {
-        setThreadMessages([]);
-        return;
-      }
 
-      setThreadMessages(Array.isArray(data?.messages) ? data.messages : []);
+      setThreadMessages(Array.isArray(response.data?.messages) ? response.data.messages : []);
     } catch {
       setThreadMessages([]);
     } finally {
@@ -122,21 +123,14 @@ export default function Inbox() {
   const syncGmail = async () => {
     if (!token) return;
     try {
-      const response = await fetch(`${AUTH_API_URL}/email-integrations/gmail/sync`, {
-        method: "POST",
+      const response = await axios.post<{ syncedEmails?: number }>(`${AUTH_API_URL}/email-integrations/gmail/sync`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
 
-      if (!response.ok) {
-        toast({ title: "Unable to sync Gmail emails.", description: data?.message || "Please try again." });
-        return;
-      }
-
-      toast({ title: `Synced ${Number(data?.syncedEmails || 0)} Gmail emails.` });
+      toast({ title: `Synced ${Number(response.data?.syncedEmails || 0)} Gmail emails.` });
       void loadEmails();
-    } catch {
-      toast({ title: "Unable to sync Gmail emails.", description: "Please try again." });
+    } catch (error) {
+      toast({ title: "Unable to sync Gmail emails.", description: (error as Error).message || "Please try again." });
     }
   };
 
@@ -169,24 +163,17 @@ export default function Inbox() {
     ];
 
     try {
-      const response = await fetch(`${AUTH_API_URL}/emails/ai-reply`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+      const response = await axios.post<{ reply?: string }>(
+        `${AUTH_API_URL}/emails/ai-reply`,
+        { inputText: contextLines.join("\n") },
+        {
+          headers: { Authorization: `Bearer ${token}` },
         },
-        body: JSON.stringify({ inputText: contextLines.join("\n") }),
-      });
+      );
 
-      const data = await response.json();
-      if (!response.ok) {
-        toast({ title: "Unable to generate AI reply.", description: data?.message || "Please try again." });
-        return;
-      }
-
-      setDraftReply(String(data?.reply || ""));
-    } catch {
-      toast({ title: "Unable to generate AI reply.", description: "Please try again." });
+      setDraftReply(String(response.data?.reply || ""));
+    } catch (error) {
+      toast({ title: "Unable to generate AI reply.", description: (error as Error).message || "Please try again." });
     } finally {
       setGeneratingReply(false);
     }
@@ -209,30 +196,23 @@ export default function Inbox() {
 
     setSendingReply(true);
     try {
-      const response = await fetch(`${AUTH_API_URL}/emails/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      await axios.post(
+        `${AUTH_API_URL}/emails/send`,
+        {
           to: recipient,
           subject: `Re: ${selectedEmail.subject || "(no subject)"}`,
           body,
           replyToExternalId: selectedEmail.external_id || "",
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        toast({ title: "Unable to send reply.", description: data?.message || "Please try again." });
-        return;
-      }
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
 
       toast({ title: "Reply sent successfully." });
       void loadThread(selectedEmail.external_id || "");
-    } catch {
-      toast({ title: "Unable to send reply.", description: "Please try again." });
+    } catch (error) {
+      toast({ title: "Unable to send reply.", description: (error as Error).message || "Please try again." });
     } finally {
       setSendingReply(false);
     }
@@ -260,8 +240,21 @@ export default function Inbox() {
 
       <div className="grid grid-cols-12 gap-6 h-[calc(100vh-12rem)]">
         <Card className="col-span-4 flex flex-col overflow-hidden border-sidebar-border">
-          <div className="p-4 border-b border-border bg-muted/30">
+          <div className="p-4 border-b border-border bg-muted/30 space-y-3">
             <Input placeholder="Search emails..." className="bg-background" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <div className="flex flex-wrap gap-2">
+              {CATEGORY_TABS.map((category) => (
+                <Button
+                  key={category}
+                  type="button"
+                  size="sm"
+                  variant={selectedCategory === category ? "default" : "outline"}
+                  onClick={() => setSelectedCategory(category)}
+                >
+                  {category[0]}{category.slice(1).toLowerCase()}
+                </Button>
+              ))}
+            </div>
           </div>
           <ScrollArea className="flex-1">
             <div className="divide-y divide-border">
@@ -277,9 +270,13 @@ export default function Inbox() {
                   </div>
                   <h3 className="font-medium text-sm text-foreground mb-1 truncate">{email.subject || "(no subject)"}</h3>
                   <p className="text-xs text-muted-foreground line-clamp-2">{email.snippet || "No preview"}</p>
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex gap-2 flex-wrap">
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-blue-200 text-blue-600 bg-blue-50">
                       {String(email.provider || "email").toUpperCase()}
+                    </Badge>
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5">
+                      {String(email.category || "OTHER").toUpperCase()}
+                      {typeof email.confidence_score === "number" ? ` • ${Math.round(Number(email.confidence_score) * 100)}%` : ""}
                     </Badge>
                   </div>
                 </div>
@@ -353,8 +350,8 @@ export default function Inbox() {
                   </div>
 
                   <div className="flex gap-3">
-                    <Button className="bg-primary hover:bg-primary/90 text-white shadow-md shadow-primary/20" onClick={() => { void sendReply(); }} disabled={sendingReply}>
-                      <CornerUpLeft className="w-4 h-4 mr-2" /> {sendingReply ? "Sending..." : "Send Reply"}
+                    <Button className="bg-primary hover:bg-primary/90 text-white shadow-md shadow-primary/20" onClick={() => { void sendReply(); }} disabled={sendingReply || Boolean(selectedEmail?.replied_at)}>
+                      <CornerUpLeft className="w-4 h-4 mr-2" /> {selectedEmail?.replied_at ? "Already Replied" : (sendingReply ? "Sending..." : "Send Reply") }
                     </Button>
                     <Button variant="outline" className="bg-background" onClick={() => { void generateAiReply(); }} disabled={generatingReply}>
                       {generatingReply ? "Generating..." : "Generate AI Reply"}
