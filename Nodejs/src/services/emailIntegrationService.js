@@ -12,6 +12,7 @@ import {
   upsertInboxEmails,
 } from "../db/emailIntegrationRepository.js";
 import { runAutomations } from "./automation/executionEngine.js";
+import { isSmtpConfigured, sendBasicEmail } from "./emailService.js";
 import {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
@@ -422,61 +423,6 @@ export const getInboxEmails = async (authHeader, query = {}) => {
   return { status: 200, body: { emails, categories: EMAIL_CATEGORIES } };
 };
 
-const encodeBase64Url = (value) =>
-  Buffer.from(String(value || ""), "utf8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-
-const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
-  const safeTo = String(to || "").trim();
-  const safeSubject = String(subject || "").trim() || "(no subject)";
-  const safeBody = String(bodyText || "").trim();
-  const safeInReplyTo = String(inReplyTo || "").trim();
-  const safeReferences = String(references || "").trim();
-
-  const headers = [
-    `To: ${safeTo}`,
-    "Content-Type: text/plain; charset=utf-8",
-    "MIME-Version: 1.0",
-    `Subject: ${safeSubject}`,
-  ];
-
-  if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
-  if (safeReferences) headers.push(`References: ${safeReferences}`);
-
-  return [...headers, "", safeBody].join("\r\n");
-};
-
-const getHeaderValue = (headers, name) => {
-  const target = String(name || "").toLowerCase();
-  const row = (Array.isArray(headers) ? headers : []).find((header) => String(header?.name || "").toLowerCase() === target);
-  return String(row?.value || "").trim();
-};
-
-const fetchGmailReplyContext = async ({ accessToken, messageId }) => {
-  if (!messageId) return null;
-
-  const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  const data = await response.json();
-  if (!response.ok) return null;
-
-  const headers = Array.isArray(data?.payload?.headers) ? data.payload.headers : [];
-  const messageIdHeader = getHeaderValue(headers, "Message-ID");
-  const referencesHeader = getHeaderValue(headers, "References");
-
-  return {
-    threadId: String(data?.threadId || "").trim() || null,
-    messageIdHeader: messageIdHeader || null,
-    referencesHeader: referencesHeader || null,
-  };
-};
-
-
-
 export const getInboxThread = async (authHeader, externalId = "") => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
@@ -509,6 +455,13 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     return { status: 404, body: { message: "Gmail is not connected" } };
   }
 
+  if (!isSmtpConfigured()) {
+    return {
+      status: 400,
+      body: { message: "SMTP is not configured. Configure Auto-X SMTP to send replies from your Auto-X mailbox." },
+    };
+  }
+
   const to = String(payload.to || "").trim();
   const subject = String(payload.subject || "").trim();
   const bodyText = String(payload.body || "").trim();
@@ -535,34 +488,11 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
   }
 
   try {
-    const replyContext = await fetchGmailReplyContext({
-      accessToken: integration.access_token,
-      messageId: replyToExternalId,
+    await sendBasicEmail({
+      to,
+      subject,
+      text: bodyText,
     });
-
-    const inReplyTo = replyContext?.messageIdHeader || "";
-    const references = [replyContext?.referencesHeader, replyContext?.messageIdHeader].filter(Boolean).join(" ").trim();
-    const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references }));
-
-    const sendBody = {
-      raw,
-      ...(replyContext?.threadId ? { threadId: replyContext.threadId } : {}),
-    };
-
-    const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${integration.access_token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(sendBody),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      const message = data?.error?.message || "Unable to send email via Gmail";
-      return { status: 502, body: { message } };
-    }
 
     if (replyToExternalId) {
       await markInboxEmailReplied({
@@ -576,11 +506,10 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
       status: 200,
       body: {
         message: "Email sent successfully",
-        gmailMessageId: data?.id || null,
       },
     };
   } catch {
-    return { status: 502, body: { message: "Unable to send email via Gmail" } };
+    return { status: 502, body: { message: "Unable to send email from Auto-X mailbox" } };
   }
 };
 
