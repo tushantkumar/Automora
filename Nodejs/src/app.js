@@ -5,6 +5,7 @@ import customerRouter from "./routes/customerRoutes.js";
 import invoiceRouter from "./routes/invoiceRoutes.js";
 import emailIntegrationRouter from "./routes/emailIntegrationRoutes.js";
 import mailTemplateRouter from "./routes/mailTemplateRoutes.js";
+import automationRouter from "./routes/automationRoutes.js";
 
 const app = express();
 
@@ -15,5 +16,6 @@ app.use(customerRouter);
 app.use(invoiceRouter);
 app.use(emailIntegrationRouter);
 app.use(mailTemplateRouter);
+app.use(automationRouter);
 
 export default app;
