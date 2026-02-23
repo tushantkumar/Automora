@@ -86,7 +86,7 @@ const formSchema = z
     subTrigger: z.string().optional().default(""),
     conditionLogic: z.enum(["AND", "OR"]),
     conditions: z.array(conditionSchema),
-    action: z.enum(["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)", "CRM", "Invoice"]),
+    action: z.enum(["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)", "CRM", "Invoice"]),
     subAction: z.string().optional().default(""),
     mailTemplateId: z.string().optional().default(""),
     isActive: z.boolean().default(true),
@@ -106,7 +106,7 @@ const formSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["conditions"], message: "At least one condition is required" });
     }
 
-    if (["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)", "AI Generate (Auto Send)"].includes(value.action) && !value.mailTemplateId) {
+    if (["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(value.action) && !value.mailTemplateId) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["mailTemplateId"], message: "Mail template is required" });
     }
 
@@ -249,6 +249,14 @@ export default function Automation() {
     }
   }, [trigger, form]);
 
+  useEffect(() => {
+    if (trigger === "Email Received") {
+      form.setValue("conditions", []);
+    } else if (form.getValues("conditions").length === 0) {
+      form.setValue("conditions", [{ entity: "customer", field: fieldsByEntity("customer")[0]?.key || "", operator: "equals", value: "", secondaryValue: "", joiner: "AND" }]);
+    }
+  }, [trigger, form, metadata]);
+
   const submitForm = form.handleSubmit(async (values) => {
     try {
       const normalizedConditions = values.conditions.map((condition) => {
@@ -274,8 +282,8 @@ export default function Automation() {
         ...values,
         subTrigger: ["Customer", "Invoice"].includes(values.trigger) ? values.subTrigger : undefined,
         subAction: values.action === "CRM" ? "Upsert CRM" : values.action === "Invoice" ? "Upsert Invoice" : undefined,
-        mailTemplateId: ["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(values.action) ? values.mailTemplateId : undefined,
-        conditions: normalizedConditions,
+        mailTemplateId: ["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(values.action) ? values.mailTemplateId : undefined,
+        conditions: values.trigger === "Email Received" ? [] : normalizedConditions,
       };
 
       if (editing) {
@@ -439,20 +447,21 @@ export default function Automation() {
               </div>
             </div>
 
-            <div className="space-y-3">
-              <h3 className="font-semibold">2. Conditions</h3>
-              <div>
-                <Label>Fallback Condition Logic</Label>
-                <Select value={form.watch("conditionLogic")} onValueChange={(value) => form.setValue("conditionLogic", value as "AND" | "OR")}>
-                  <SelectTrigger className="max-w-[220px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="AND">AND</SelectItem>
-                    <SelectItem value="OR">OR</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            {trigger !== "Email Received" && (
+              <div className="space-y-3">
+                <h3 className="font-semibold">2. Conditions</h3>
+                <div>
+                  <Label>Fallback Condition Logic</Label>
+                  <Select value={form.watch("conditionLogic")} onValueChange={(value) => form.setValue("conditionLogic", value as "AND" | "OR")}>
+                    <SelectTrigger className="max-w-[220px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="AND">AND</SelectItem>
+                      <SelectItem value="OR">OR</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              {fields.map((field, index) => {
+                {fields.map((field, index) => {
                 const entity = form.watch(`conditions.${index}.entity`);
                 const fieldKey = form.watch(`conditions.${index}.field`);
                 const operator = form.watch(`conditions.${index}.operator`);
@@ -506,9 +515,10 @@ export default function Automation() {
                 );
               })}
 
-              <Button type="button" variant="outline" onClick={() => append({ entity: "customer", field: fieldsByEntity("customer")[0]?.key || "", operator: "equals", value: "", secondaryValue: "", joiner: "AND" })}>Add Condition</Button>
-              <p className="text-xs text-destructive">{form.formState.errors.conditions?.message as string | undefined}</p>
-            </div>
+                <Button type="button" variant="outline" onClick={() => append({ entity: "customer", field: fieldsByEntity("customer")[0]?.key || "", operator: "equals", value: "", secondaryValue: "", joiner: "AND" })}>Add Condition</Button>
+                <p className="text-xs text-destructive">{form.formState.errors.conditions?.message as string | undefined}</p>
+              </div>
+            )}
 
             <div className="space-y-3">
               <h3 className="font-semibold">3. Actions</h3>
@@ -535,7 +545,7 @@ export default function Automation() {
                   </div>
                 )}
 
-                {["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(action) && (
+                {["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(action) && (
                   <div>
                     <Label>Mail Template</Label>
                     <Select value={form.watch("mailTemplateId") || undefined} onValueChange={(value) => form.setValue("mailTemplateId", value)}>
