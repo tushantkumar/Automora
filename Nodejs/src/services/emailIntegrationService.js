@@ -18,17 +18,6 @@ import {
   GOOGLE_REDIRECT_URI,
   OLLAMA_BASE_URL,
   OLLAMA_MODEL,
-  IMAP_HOST,
-  IMAP_PORT,
-  IMAP_SECURE,
-  IMAP_USER,
-  IMAP_PASS,
-  SMTP_HOST,
-  SMTP_PORT,
-  SMTP_TLS,
-  SMTP_USER,
-  SMTP_PASS,
-  SMTP_FROM,
 } from "../config/constants.js";
 
 const GMAIL_SCOPES = [
@@ -54,19 +43,6 @@ const decodeState = (value) => {
   } catch {
     return null;
   }
-};
-
-const loadImapDependencies = async () => {
-  const [{ ImapFlow }, { simpleParser }] = await Promise.all([
-    import("imapflow"),
-    import("mailparser"),
-  ]);
-  return { ImapFlow, simpleParser };
-};
-
-const loadNodemailer = async () => {
-  const mod = await import("nodemailer");
-  return mod.default || mod;
 };
 
 const parseAddressHeader = (value) => {
@@ -289,129 +265,6 @@ const fetchGmailMessages = async (accessToken, maxResults = 50) => {
   return details.filter(Boolean);
 };
 
-const normalizeFolderName = (value) => {
-  const folder = String(value || "INBOX").trim().toUpperCase();
-  if (["INBOX", "SENT", "DRAFT", "DRAFTS", "TRASH"].includes(folder)) {
-    if (folder === "DRAFT") return "DRAFTS";
-    return folder;
-  }
-  return "INBOX";
-};
-
-const fetchImapMessages = async ({ folder, search = "", page = 1, pageSize = 20, credentials = {} }) => {
-  const { ImapFlow, simpleParser } = await loadImapDependencies();
-  const client = new ImapFlow({
-    host: credentials.host,
-    port: credentials.port,
-    secure: credentials.secure,
-    auth: { user: credentials.user, pass: credentials.pass },
-  });
-
-  await client.connect();
-
-  try {
-    const mailbox = normalizeFolderName(folder);
-    const lock = await client.getMailboxLock(mailbox === "INBOX" ? "INBOX" : mailbox);
-
-    try {
-      const allUids = [];
-      for await (const msg of client.fetch("1:*", { uid: true })) {
-        allUids.push(Number(msg.uid));
-      }
-
-      const sorted = allUids.sort((a, b) => b - a);
-      const offset = (Math.max(page, 1) - 1) * Math.max(pageSize, 1);
-      const target = sorted.slice(offset, offset + Math.max(pageSize, 1));
-
-      const emails = [];
-      for (const uid of target) {
-        for await (const msg of client.fetch(String(uid), { uid: true, envelope: true, source: true, internalDate: true })) {
-          const parsed = await simpleParser(msg.source);
-          const from = parsed.from?.value?.[0];
-          const text = String(parsed.text || parsed.html || "").trim();
-          emails.push({
-            externalId: `${mailbox}-${msg.uid}`,
-            fromName: from?.name || from?.address || "Unknown sender",
-            fromEmail: from?.address || "",
-            subject: String(parsed.subject || msg.envelope?.subject || "(no subject)"),
-            snippet: text.slice(0, 2000),
-            folder: mailbox,
-            receivedAt: (msg.internalDate || new Date()).toISOString(),
-          });
-        }
-      }
-
-      const filtered = search
-        ? emails.filter((email) => {
-            const q = String(search).toLowerCase();
-            return [email.subject, email.fromName, email.fromEmail, email.snippet].join(" ").toLowerCase().includes(q);
-          })
-        : emails;
-
-      return { emails: filtered, total: sorted.length };
-    } finally {
-      lock.release();
-    }
-  } finally {
-    await client.logout();
-  }
-};
-
-const fetchGmailMessagesViaImapOAuth = async ({ accessToken, connectedEmail, maxResults = 50 }) => {
-  const { ImapFlow, simpleParser } = await loadImapDependencies();
-
-  const client = new ImapFlow({
-    host: "imap.gmail.com",
-    port: 993,
-    secure: true,
-    auth: {
-      user: String(connectedEmail || "").trim(),
-      accessToken,
-    },
-  });
-
-  await client.connect();
-
-  try {
-    const lock = await client.getMailboxLock("INBOX");
-    try {
-      const uids = [];
-      for await (const msg of client.fetch("1:*", { uid: true })) {
-        uids.push(Number(msg.uid));
-      }
-
-      const targetUids = uids
-        .sort((a, b) => b - a)
-        .slice(0, Math.max(Number(maxResults || 50), 1));
-
-      const emails = [];
-      for (const uid of targetUids) {
-        for await (const msg of client.fetch(String(uid), { uid: true, source: true, envelope: true, internalDate: true })) {
-          const parsed = await simpleParser(msg.source);
-          const from = parsed.from?.value?.[0];
-          const body = String(parsed.text || parsed.html || "").trim();
-
-          emails.push({
-            externalId: String(msg.uid),
-            fromName: from?.name || from?.address || "Unknown sender",
-            fromEmail: from?.address || "",
-            subject: String(parsed.subject || msg.envelope?.subject || "(no subject)"),
-            snippet: body.slice(0, 2000),
-            folder: "INBOX",
-            receivedAt: (msg.internalDate || new Date()).toISOString(),
-          });
-        }
-      }
-
-      return emails;
-    } finally {
-      lock.release();
-    }
-  } finally {
-    await client.logout();
-  }
-};
-
 const fetchGmailThreadMessages = async ({ accessToken, messageId, connectedEmail }) => {
   if (!messageId) return [];
 
@@ -518,11 +371,7 @@ export const handleGmailCallback = async ({ code, state }) => {
     connectedEmail: profile?.emailAddress || null,
   });
 
-  const emails = await fetchGmailMessagesViaImapOAuth({
-    accessToken: tokenData.access_token,
-    connectedEmail: profile?.emailAddress || "",
-    maxResults: 50,
-  });
+  const emails = await fetchGmailMessages(tokenData.access_token, 50);
   const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
   await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
   await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
@@ -547,11 +396,7 @@ export const syncGmailEmails = async (authHeader) => {
   }
 
   try {
-    const emails = await fetchGmailMessagesViaImapOAuth({
-      accessToken: integration.access_token,
-      connectedEmail: integration.connected_email || "",
-      maxResults: 50,
-    });
+    const emails = await fetchGmailMessages(integration.access_token, 50);
     const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
     await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
     await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
@@ -563,80 +408,18 @@ export const syncGmailEmails = async (authHeader) => {
   }
 };
 
-export const syncImapEmails = async (authHeader, payload = {}) => {
-  const user = await getAuthorizedUser(authHeader);
-  if (!user) return { status: 401, body: { message: "unauthorized" } };
-
-  const page = Math.max(Number(payload.page || 1), 1);
-  const pageSize = Math.min(Math.max(Number(payload.pageSize || 20), 1), 100);
-  const folder = normalizeFolderName(payload.folder || "INBOX");
-  const search = String(payload.search || "").trim();
-
-  const credentials = {
-    host: String(payload.imapHost || IMAP_HOST || "").trim(),
-    port: Number(payload.imapPort || IMAP_PORT || 993),
-    secure: payload.imapSecure == null ? IMAP_SECURE : Boolean(payload.imapSecure),
-    user: String(payload.imapUser || IMAP_USER || user.email || "").trim(),
-    pass: String(payload.imapPass || IMAP_PASS || "").trim(),
-  };
-
-  if (!credentials.host || !credentials.user || !credentials.pass) {
-    return { status: 400, body: { message: "IMAP credentials are required" } };
-  }
-
-  try {
-    const { emails, total } = await fetchImapMessages({ folder, search, page, pageSize, credentials });
-    await upsertInboxEmails({ userId: user.id, provider: "imap", emails });
-
-    return {
-      status: 200,
-      body: {
-        message: "IMAP sync successful",
-        syncedEmails: emails.length,
-        pagination: {
-          page,
-          pageSize,
-          total,
-          totalPages: Math.max(Math.ceil(total / pageSize), 1),
-        },
-      },
-    };
-  } catch (error) {
-    return { status: 502, body: { message: String(error?.message || "Unable to sync IMAP emails") } };
-  }
-};
-
 export const getInboxEmails = async (authHeader, query = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
-  const page = Math.max(Number(query.page || 1), 1);
-  const pageSize = Math.min(Math.max(Number(query.pageSize || 20), 1), 100);
   const category = String(query.category || "").trim().toUpperCase();
-  const folder = normalizeFolderName(String(query.folder || "INBOX").trim());
-  const { rows, total } = await listInboxEmailsByUserId({
+  const emails = await listInboxEmailsByUserId({
     userId: user.id,
     search: String(query.search || "").trim(),
     category: EMAIL_CATEGORIES.includes(category) ? category : "",
-    folder,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
   });
 
-  return {
-    status: 200,
-    body: {
-      emails: rows,
-      categories: EMAIL_CATEGORIES,
-      folders: ["INBOX", "SENT", "DRAFTS", "TRASH"],
-      pagination: {
-        page,
-        pageSize,
-        total,
-        totalPages: Math.max(Math.ceil(total / pageSize), 1),
-      },
-    },
-  };
+  return { status: 200, body: { emails, categories: EMAIL_CATEGORIES } };
 };
 
 const encodeBase64Url = (value) =>
@@ -733,34 +516,6 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
 
   if (!to || !bodyText) {
     return { status: 400, body: { message: "Recipient and message body are required" } };
-  }
-
-  const transportType = String(payload.transport || "gmail").trim().toLowerCase();
-
-  if (transportType === "smtp") {
-    try {
-      const nodemailer = await loadNodemailer();
-      const transporter = nodemailer.createTransport({
-        host: String(payload.smtpHost || SMTP_HOST || "").trim(),
-        port: Number(payload.smtpPort || SMTP_PORT || 587),
-        secure: payload.smtpSecure == null ? SMTP_TLS : Boolean(payload.smtpSecure),
-        auth: {
-          user: String(payload.smtpUser || SMTP_USER || "").trim(),
-          pass: String(payload.smtpPass || SMTP_PASS || "").trim(),
-        },
-      });
-
-      await transporter.sendMail({
-        from: String(payload.from || SMTP_FROM || payload.smtpUser || SMTP_USER || "").trim(),
-        to,
-        subject: subject || "(no subject)",
-        text: bodyText,
-      });
-
-      return { status: 200, body: { message: "Email sent successfully", transport: "smtp" } };
-    } catch (error) {
-      return { status: 502, body: { message: String(error?.message || "Unable to send email via SMTP") } };
-    }
   }
 
   if (replyToExternalId) {

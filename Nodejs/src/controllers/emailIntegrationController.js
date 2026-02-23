@@ -6,7 +6,6 @@ import {
   getInboxAiReply,
   handleGmailCallback,
   syncGmailEmails,
-  syncImapEmails,
   sendGmailEmail,
   disconnectEmailIntegration,
 } from "../services/emailIntegrationService.js";
@@ -53,11 +52,6 @@ export const gmailCallbackHandler = async (req, res) => {
 
 export const syncGmailEmailsHandler = async (req, res) => {
   const result = await syncGmailEmails(req.headers.authorization || "");
-  return res.status(result.status).json(result.body);
-};
-
-export const syncImapEmailsHandler = async (req, res) => {
-  const result = await syncImapEmails(req.headers.authorization || "", req.body || {});
   return res.status(result.status).json(result.body);
 };
 

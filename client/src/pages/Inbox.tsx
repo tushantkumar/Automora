@@ -19,9 +19,9 @@ import { axios } from "@/lib/axios";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
 
-type MailFolder = "INBOX" | "SENT" | "DRAFTS" | "TRASH";
+type EmailCategory = "INVOICE" | "QUERY" | "SUPPORT" | "CUSTOMER" | "OTHER";
 
-const FOLDER_TABS: MailFolder[] = ["INBOX", "SENT", "DRAFTS", "TRASH"];
+const CATEGORY_TABS: EmailCategory[] = ["INVOICE", "QUERY", "SUPPORT", "CUSTOMER", "OTHER"];
 
 type InboxEmail = {
   id: string;
@@ -31,7 +31,8 @@ type InboxEmail = {
   external_id?: string;
   subject: string;
   snippet: string;
-  folder?: MailFolder | string | null;
+  category?: EmailCategory | null;
+  confidence_score?: number | null;
   replied_at?: string | null;
   received_at?: string;
 };
@@ -54,10 +55,7 @@ export default function Inbox() {
   const [emails, setEmails] = useState<InboxEmail[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<InboxEmail | null>(null);
   const [search, setSearch] = useState("");
-  const [selectedFolder, setSelectedFolder] = useState<MailFolder>("INBOX");
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(20);
-  const [totalPages, setTotalPages] = useState(1);
+  const [selectedCategory, setSelectedCategory] = useState<EmailCategory>("INVOICE");
   const [draftReply, setDraftReply] = useState("Thanks for your email. We received it and will get back to you shortly.");
   const [sendingReply, setSendingReply] = useState(false);
   const [generatingReply, setGeneratingReply] = useState(false);
@@ -76,18 +74,15 @@ export default function Inbox() {
     try {
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
-      params.set("folder", selectedFolder);
-      params.set("page", String(page));
-      params.set("pageSize", String(pageSize));
+      params.set("category", selectedCategory);
 
-      const response = await axios.get<{ emails: InboxEmail[]; pagination?: { totalPages?: number } }>(
+      const response = await axios.get<{ emails: InboxEmail[] }>(
         `${AUTH_API_URL}/emails${params.toString() ? `?${params.toString()}` : ""}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
 
       const rows = Array.isArray(response.data?.emails) ? response.data.emails : [];
       setEmails(rows);
-      setTotalPages(Math.max(Number(response.data?.pagination?.totalPages || 1), 1));
       setSelectedEmail((prev) => {
         if (emailIdFromQuery) {
           const matchedEmail = rows.find((row: InboxEmail) => row.id === emailIdFromQuery || row.external_id === emailIdFromQuery);
@@ -103,7 +98,7 @@ export default function Inbox() {
 
   useEffect(() => {
     void loadEmails();
-  }, [search, selectedFolder, page, pageSize, emailIdFromQuery]);
+  }, [search, selectedCategory, emailIdFromQuery]);
 
   const loadThread = async (externalId: string) => {
     if (!token || !externalId) {
@@ -125,18 +120,17 @@ export default function Inbox() {
     }
   };
 
-  const syncFolderEmails = async () => {
+  const syncGmail = async () => {
     if (!token) return;
     try {
-      const response = await axios.post<{ syncedEmails?: number }>(`${AUTH_API_URL}/emails/imap/sync`, { folder: selectedFolder, page, pageSize, search }, {
+      const response = await axios.post<{ syncedEmails?: number }>(`${AUTH_API_URL}/email-integrations/gmail/sync`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      toast({ title: `Synced ${Number(response.data?.syncedEmails || 0)} emails from ${selectedFolder}.` });
-      setPage(1);
+      toast({ title: `Synced ${Number(response.data?.syncedEmails || 0)} Gmail emails.` });
       void loadEmails();
     } catch (error) {
-      toast({ title: "Unable to sync IMAP emails.", description: (error as Error).message || "Please try again." });
+      toast({ title: "Unable to sync Gmail emails.", description: (error as Error).message || "Please try again." });
     }
   };
 
@@ -240,7 +234,7 @@ export default function Inbox() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline"><Archive className="w-4 h-4 mr-2" /> Archive All Read</Button>
-          <Button onClick={() => { void syncFolderEmails(); }}><Sparkles className="w-4 h-4 mr-2" /> Sync IMAP Folder</Button>
+          <Button onClick={() => { void syncGmail(); }}><Sparkles className="w-4 h-4 mr-2" /> Pull Gmail Emails</Button>
         </div>
       </div>
 
@@ -249,15 +243,15 @@ export default function Inbox() {
           <div className="p-4 border-b border-border bg-muted/30 space-y-3">
             <Input placeholder="Search emails..." className="bg-background" value={search} onChange={(event) => setSearch(event.target.value)} />
             <div className="flex flex-wrap gap-2">
-              {FOLDER_TABS.map((folder) => (
+              {CATEGORY_TABS.map((category) => (
                 <Button
-                  key={folder}
+                  key={category}
                   type="button"
                   size="sm"
-                  variant={selectedFolder === folder ? "default" : "outline"}
-                  onClick={() => { setPage(1); setSelectedFolder(folder); }}
+                  variant={selectedCategory === category ? "default" : "outline"}
+                  onClick={() => setSelectedCategory(category)}
                 >
-                  {folder}
+                  {category[0]}{category.slice(1).toLowerCase()}
                 </Button>
               ))}
             </div>
@@ -281,7 +275,8 @@ export default function Inbox() {
                       {String(email.provider || "email").toUpperCase()}
                     </Badge>
                     <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5">
-                      {String(email.folder || "INBOX").toUpperCase()}
+                      {String(email.category || "OTHER").toUpperCase()}
+                      {typeof email.confidence_score === "number" ? ` • ${Math.round(Number(email.confidence_score) * 100)}%` : ""}
                     </Badge>
                   </div>
                 </div>
@@ -289,11 +284,6 @@ export default function Inbox() {
               {emails.length === 0 && <p className="p-4 text-sm text-muted-foreground">No emails yet. Connect Gmail in Settings and pull emails.</p>}
             </div>
           </ScrollArea>
-          <div className="p-3 border-t border-border flex items-center justify-between">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
-            <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
-            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
-          </div>
         </Card>
 
         <Card className="col-span-8 flex flex-col overflow-hidden border-sidebar-border shadow-lg">
