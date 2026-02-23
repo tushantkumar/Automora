@@ -132,6 +132,42 @@ export const listInboxEmailsByUserId = async ({ userId, search = "" }) => {
 };
 
 
+export const createInboxSentEmail = async ({ userId, provider, replyToExternalId, toEmail, subject, snippet, sentAt = null }) => {
+  const result = await pool.query(
+    `INSERT INTO auth_inbox_sent_emails
+      (id, user_id, provider, reply_to_external_id, to_email, subject, snippet, sent_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, NOW()))
+     RETURNING id, user_id, provider, reply_to_external_id, to_email, subject, snippet, sent_at, created_at`,
+    [
+      createUserId(),
+      userId,
+      provider,
+      String(replyToExternalId || "").trim(),
+      String(toEmail || "").trim(),
+      String(subject || "").trim(),
+      String(snippet || "").trim(),
+      sentAt,
+    ],
+  );
+
+  return result.rows[0] ?? null;
+};
+
+export const listInboxSentEmailsByReplyExternalId = async ({ userId, provider, replyToExternalId }) => {
+  const result = await pool.query(
+    `SELECT id, user_id, provider, reply_to_external_id, to_email, subject, snippet, sent_at, created_at
+     FROM auth_inbox_sent_emails
+     WHERE user_id = $1
+       AND provider = $2
+       AND reply_to_external_id = $3
+     ORDER BY sent_at ASC, created_at ASC`,
+    [userId, provider, String(replyToExternalId || "").trim()],
+  );
+
+  return result.rows;
+};
+
+
 export const deleteEmailIntegrationByProvider = async ({ userId, provider }) => {
   const result = await pool.query(
     `DELETE FROM auth_email_integrations

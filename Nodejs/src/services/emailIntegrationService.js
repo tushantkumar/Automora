@@ -6,7 +6,9 @@ import {
   listEmailIntegrationsByUserId,
   getInboxEmailByExternalId,
   listInboxEmailsByUserId,
+  listInboxSentEmailsByReplyExternalId,
   markInboxEmailReplied,
+  createInboxSentEmail,
   upsertEmailIntegration,
   upsertInboxEmails,
 } from "../db/emailIntegrationRepository.js";
@@ -98,7 +100,20 @@ const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "
       },
     });
 
-    const hasSentReply = (Array.isArray(results) ? results : []).some((item) => String(item?.result?.mode || "").toLowerCase() === "sent");
+    const sentResults = (Array.isArray(results) ? results : []).filter((item) => String(item?.result?.mode || "").toLowerCase() === "sent");
+    const hasSentReply = sentResults.length > 0;
+
+    for (const sentResult of sentResults) {
+      await createInboxSentEmail({
+        userId: user.id,
+        provider,
+        replyToExternalId: externalId,
+        toEmail: String(sentResult?.result?.to || email?.fromEmail || "").trim(),
+        subject: String(sentResult?.result?.subject || email?.subject || "(no subject)").trim(),
+        snippet: String(sentResult?.result?.body || "").trim(),
+      });
+    }
+
     if (hasSentReply) {
       await markInboxEmailReplied({
         userId: user.id,
@@ -241,6 +256,30 @@ const fetchGmailThreadMessages = async ({ accessToken, messageId, connectedEmail
   });
 };
 
+
+const mergeThreadMessages = ({ gmailMessages, localSentMessages, ownerEmail }) => {
+  const owner = String(ownerEmail || "").trim();
+  const sentRows = (Array.isArray(localSentMessages) ? localSentMessages : []).map((row) => ({
+    id: `local-${String(row?.id || "")}`,
+    thread_id: null,
+    from_name: owner || "Auto-X",
+    from_email: owner || "",
+    to: String(row?.to_email || ""),
+    subject: String(row?.subject || "(no subject)"),
+    snippet: String(row?.snippet || ""),
+    received_at: String(row?.sent_at || row?.created_at || new Date().toISOString()),
+    direction: "sent",
+  }));
+
+  return [...(Array.isArray(gmailMessages) ? gmailMessages : []), ...sentRows]
+    .filter((row) => row && row.id)
+    .sort((a, b) => {
+      const first = new Date(String(a?.received_at || 0)).getTime();
+      const second = new Date(String(b?.received_at || 0)).getTime();
+      return first - second;
+    });
+};
+
 export const getEmailIntegrationStatus = async (authHeader) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
@@ -359,6 +398,12 @@ export const getInboxThread = async (authHeader, externalId = "") => {
   const integration = await getEmailIntegrationByProvider({ userId: user.id, provider: "gmail" });
   if (!integration?.access_token) return { status: 404, body: { message: "Gmail is not connected" } };
 
+  const localSentMessages = await listInboxSentEmailsByReplyExternalId({
+    userId: user.id,
+    provider: "gmail",
+    replyToExternalId: messageId,
+  });
+
   try {
     const threadMessages = await fetchGmailThreadMessages({
       accessToken: integration.access_token,
@@ -366,8 +411,30 @@ export const getInboxThread = async (authHeader, externalId = "") => {
       connectedEmail: integration.connected_email || "",
     });
 
-    return { status: 200, body: { messages: threadMessages } };
+    return {
+      status: 200,
+      body: {
+        messages: mergeThreadMessages({
+          gmailMessages: threadMessages,
+          localSentMessages,
+          ownerEmail: integration.connected_email || "",
+        }),
+      },
+    };
   } catch {
+    if (localSentMessages.length > 0) {
+      return {
+        status: 200,
+        body: {
+          messages: mergeThreadMessages({
+            gmailMessages: [],
+            localSentMessages,
+            ownerEmail: integration.connected_email || "",
+          }),
+        },
+      };
+    }
+
     return { status: 502, body: { message: "Unable to load email thread" } };
   }
 };
@@ -421,6 +488,15 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     });
 
     if (replyToExternalId) {
+      await createInboxSentEmail({
+        userId: user.id,
+        provider: "gmail",
+        replyToExternalId,
+        toEmail: to,
+        subject,
+        snippet: bodyText,
+      });
+
       await markInboxEmailReplied({
         userId: user.id,
         provider: "gmail",

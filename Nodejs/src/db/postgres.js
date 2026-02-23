@@ -175,6 +175,20 @@ export const initDatabase = async () => {
   await pool.query(`ALTER TABLE auth_inbox_emails DROP COLUMN IF EXISTS confidence_score;`);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_inbox_sent_emails (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      reply_to_external_id TEXT NOT NULL,
+      to_email TEXT NOT NULL DEFAULT '',
+      subject TEXT NOT NULL DEFAULT '',
+      snippet TEXT NOT NULL DEFAULT '',
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS auth_automations (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
@@ -280,6 +294,7 @@ export const ensureDatabaseIndexes = async () => {
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_invoices_customer_id_idx ON auth_invoices(customer_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_email_integrations_user_id_idx ON auth_email_integrations(user_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_inbox_emails_user_id_idx ON auth_inbox_emails(user_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_inbox_sent_emails_lookup_idx ON auth_inbox_sent_emails(user_id, provider, reply_to_external_id);`);
   await pool.query(`DROP INDEX IF EXISTS auth_inbox_emails_category_idx;`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_mail_templates_user_id_idx ON auth_mail_templates(user_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_account_delete_otps_expires_idx ON auth_account_delete_otps(expires_at);`);
