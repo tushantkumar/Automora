@@ -107,6 +107,31 @@ export const getInvoiceById = async ({ invoiceId, userId }) => {
   return result.rows[0] ?? null;
 };
 
+
+export const getInvoiceWithCustomerByIdForAutomation = async ({ userId, invoiceId }) => {
+  const result = await pool.query(
+    `SELECT
+      i.id, i.user_id, i.customer_id, i.invoice_number, i.client_name, i.issue_date, i.due_date, i.amount, i.tax_rate, i.status, i.notes, i.line_items, i.created_at, i.updated_at,
+      c.id AS customer_ref_id,
+      c.name AS customer_name,
+      c.email AS customer_email,
+      c.contact AS customer_contact,
+      c.client AS customer_client,
+      c.status AS customer_status,
+      c.value AS customer_value
+     FROM auth_invoices i
+     LEFT JOIN auth_customers c
+       ON c.id = i.customer_id
+      AND c.user_id = i.user_id
+     WHERE i.user_id = $1
+       AND i.id = $2
+     LIMIT 1`,
+    [userId, invoiceId],
+  );
+
+  return result.rows[0] ?? null;
+};
+
 export const getPaidRevenueByCustomerId = async ({ userId, customerId }) => {
   const result = await pool.query(
     `SELECT COALESCE(SUM(amount), 0)::numeric(12,2) AS paid_revenue

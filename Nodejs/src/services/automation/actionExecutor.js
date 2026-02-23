@@ -1,44 +1,109 @@
 import { getMailTemplateById } from "../../db/mailTemplateRepository.js";
 import { sendBasicEmail } from "../emailService.js";
 import { createCustomer, getCustomerByEmail, updateCustomerById } from "../../db/customerRepository.js";
-import { createInvoice, getInvoiceByNumberForUser, updateInvoiceById } from "../../db/invoiceRepository.js";
+import {
+  createInvoice,
+  getInvoiceByNumberForUser,
+  getInvoiceWithCustomerByIdForAutomation,
+  updateInvoiceById,
+} from "../../db/invoiceRepository.js";
 import { createUserId, normalizeEmail } from "../../utils/auth.js";
 import { generateAutomationContent } from "./aiService.js";
+import { buildAutomationEmailLayout } from "./emailLayout.js";
+
+const getByPath = (obj, path) => String(path || "")
+  .split(".")
+  .reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), obj);
 
 const interpolateTemplate = (template, context) =>
   String(template || "").replace(/{{\s*([\w.]+)\s*}}/g, (_, token) => {
-    const [entity, field] = String(token).split(".");
-    return String(context?.[entity]?.[field] ?? "");
+    const value = getByPath(context, token);
+    return value == null ? "" : String(value);
   });
+
+const toParagraphHtml = (text) => `<p style="margin:0 0 16px;">${String(text || "").split("\n").join("<br/>")}</p>`;
 
 const resolveRecipient = (context) => {
   const candidates = [
     context?.customer?.email,
     context?.invoice?.customer_email,
+    context?.invoice?.customerEmail,
     context?.email?.from,
   ];
 
   return candidates.find((value) => String(value || "").includes("@")) || "";
 };
 
+const resolveInvoiceDetails = async ({ automation, userId, context }) => {
+  const invoiceRelated = automation.trigger_type === "Invoice" || automation.action_type === "Invoice";
+  if (!invoiceRelated) return null;
+
+  const invoiceId = String(context?.invoice?.id || "").trim();
+  if (!invoiceId) {
+    throw new Error("Invoice email requires invoice context");
+  }
+
+  const invoice = await getInvoiceWithCustomerByIdForAutomation({ userId, invoiceId });
+  if (!invoice) {
+    throw new Error("Invoice not found for email automation");
+  }
+
+  return invoice;
+};
+
 const executeMailLikeAction = async ({ automation, userId, context, mode }) => {
+  if (!automation.mail_template_id) {
+    throw new Error("Mail template is required for mail automation action");
+  }
+
   const template = await getMailTemplateById({ templateId: automation.mail_template_id, userId });
-  if (!template) return;
+  if (!template) {
+    throw new Error("Mail template not found");
+  }
 
-  const subject = interpolateTemplate(template.subject, context);
-  const rawBody = interpolateTemplate(template.body, context);
+  const templateSubject = String(template.subject || "").trim();
+  const templateBody = String(template.body || "").trim();
 
-  const finalBody = mode.startsWith("AI Generate")
-    ? await generateAutomationContent({ mode, templateBody: rawBody, context })
-    : rawBody;
+  if (!templateSubject) throw new Error("Mail template subject is empty");
+  if (!templateBody) throw new Error("Mail template body is empty");
 
-  const recipient = resolveRecipient(context);
-  if (!recipient) return;
+  const invoice = await resolveInvoiceDetails({ automation, userId, context });
+  const renderContext = {
+    ...context,
+    invoice: invoice || context?.invoice || null,
+    customer: context?.customer || {
+      name: invoice?.customer_name,
+      email: invoice?.customer_email,
+      contact: invoice?.customer_contact,
+      client: invoice?.customer_client,
+      status: invoice?.customer_status,
+      value: invoice?.customer_value,
+    },
+  };
+
+  const subject = interpolateTemplate(templateSubject, renderContext);
+  const baseBody = interpolateTemplate(templateBody, renderContext);
+
+  const generatedBody = mode.startsWith("AI Generate")
+    ? await generateAutomationContent({ mode, templateBody: baseBody, context: renderContext })
+    : baseBody;
+
+  const recipient = resolveRecipient(renderContext);
+  if (!recipient) {
+    throw new Error("No recipient email could be resolved for automation");
+  }
+
+  const html = buildAutomationEmailLayout({
+    companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Auto-X",
+    bodyHtml: toParagraphHtml(generatedBody),
+    invoice,
+  });
 
   await sendBasicEmail({
     to: recipient,
     subject,
-    text: finalBody,
+    text: generatedBody,
+    html,
   });
 };
 
@@ -87,7 +152,9 @@ const executeInvoiceUpsert = async ({ userId, context }) => {
     taxRate: Number(context?.invoice?.tax_rate || 0),
     status: String(context?.invoice?.status || "Unpaid").trim(),
     notes: String(context?.invoice?.notes || "Automation upsert"),
-    lineItems: Array.isArray(context?.invoice?.line_items) ? context.invoice.line_items : [{ description: "Automation item", quantity: 1, rate: Number(context?.invoice?.amount || 0) }],
+    lineItems: Array.isArray(context?.invoice?.line_items)
+      ? context.invoice.line_items
+      : [{ description: "Automation item", quantity: 1, rate: Number(context?.invoice?.amount || 0) }],
   };
 
   if (existing) {
