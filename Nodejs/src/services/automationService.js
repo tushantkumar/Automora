@@ -22,7 +22,8 @@ const getAuthorizedUser = async (authHeader) => {
 };
 
 const ALLOWED_TRIGGERS = ["Email Received", "Customer", "Invoice"];
-const ALLOWED_SUB_TRIGGERS = ["On Change", "Daily", "Weekly", "Monthly", "Day Before Overdue"];
+const CUSTOMER_SUB_TRIGGERS = ["Created", "Updated", "Deleted", "Create", "Delete"];
+const INVOICE_SUB_TRIGGERS = ["On Change", "Daily", "Weekly", "Monthly", "Day Before Overdue"];
 const ALLOWED_ACTIONS = ["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)", "CRM", "Invoice"];
 const ALLOWED_OPERATORS = [
   "equals",
@@ -58,6 +59,13 @@ const normalizeConditionValue = (operator, value) => {
   if (typeof value === "string") return value.trim();
   return value;
 };
+
+const normalizeCustomerSubTrigger = (value) => {
+  if (value === "Create") return "Created";
+  if (value === "Delete") return "Deleted";
+  return value;
+};
+
 
 const validateConditions = (conditions, fieldsMap) => {
   if (!Array.isArray(conditions)) {
@@ -111,16 +119,29 @@ const validateAndNormalizePayload = async ({ userId, payload, excludeAutomationI
   const duplicate = await getAutomationByName({ userId, name, excludeAutomationId });
   if (duplicate) return { error: "automation name already exists", status: 409 };
 
-  if (triggerType === "Invoice" && (!subTrigger || !ALLOWED_SUB_TRIGGERS.includes(subTrigger))) {
+  let normalizedSubTrigger = subTrigger;
+
+  if (triggerType === "Customer") {
+    normalizedSubTrigger = normalizeCustomerSubTrigger(subTrigger);
+    if (!normalizedSubTrigger || !CUSTOMER_SUB_TRIGGERS.includes(normalizedSubTrigger)) {
+      return { error: "Customer trigger requires a valid sub-trigger" };
+    }
+  }
+
+  if (triggerType === "Invoice" && (!subTrigger || !INVOICE_SUB_TRIGGERS.includes(subTrigger))) {
     return { error: "Invoice trigger requires a valid sub-trigger" };
   }
 
-  if (triggerType !== "Invoice" && subTrigger) {
-    return { error: "Sub-trigger is only allowed when trigger is Invoice" };
+  if (triggerType === "Email Received" && subTrigger) {
+    return { error: "Sub-trigger is not allowed for Email Received trigger" };
   }
 
-  if ((triggerType === "Customer" || triggerType === "Invoice") && conditions.length === 0) {
-    return { error: "At least one condition is required for Customer/Invoice triggers" };
+  if (triggerType === "Customer" && ["Updated"].includes(normalizedSubTrigger || "") && conditions.length === 0) {
+    return { error: "At least one condition is required for Customer Updated trigger" };
+  }
+
+  if (triggerType === "Invoice" && conditions.length === 0) {
+    return { error: "At least one condition is required for Invoice triggers" };
   }
 
   const metadata = await getAutomationEntityFields();
@@ -154,7 +175,7 @@ const validateAndNormalizePayload = async ({ userId, payload, excludeAutomationI
     value: {
       name,
       triggerType,
-      subTrigger,
+      subTrigger: normalizedSubTrigger,
       conditionLogic,
       conditions: conditions.map((condition) => ({
         ...condition,
@@ -178,7 +199,8 @@ export const getAutomationBuilderMetadataForUser = async (authHeader) => {
     status: 200,
     body: {
       triggers: ALLOWED_TRIGGERS,
-      invoiceSubTriggers: ALLOWED_SUB_TRIGGERS,
+      customerSubTriggers: CUSTOMER_SUB_TRIGGERS.filter((item) => !["Create", "Delete"].includes(item)),
+      invoiceSubTriggers: INVOICE_SUB_TRIGGERS,
       actions: ALLOWED_ACTIONS,
       operators: ALLOWED_OPERATORS,
       conditionLogic: ["AND", "OR"],

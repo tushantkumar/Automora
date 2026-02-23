@@ -2,6 +2,7 @@ import { getUserBySessionToken } from "../db/authRepository.js";
 import {
   createCustomer,
   deleteCustomerById,
+  getCustomerById,
   listCustomersByUserId,
   updateCustomerById,
 } from "../db/customerRepository.js";
@@ -52,6 +53,7 @@ export const createCustomerForUser = async (authHeader, payload) => {
 
   await runAutomations({
     triggerType: "Customer",
+    subTriggerType: "Created",
     context: { customer, user },
   });
 
@@ -83,6 +85,7 @@ export const updateCustomerForUser = async (authHeader, customerId, payload) => 
 
   await runAutomations({
     triggerType: "Customer",
+    subTriggerType: "Updated",
     context: { customer, user },
   });
 
@@ -104,8 +107,17 @@ export const deleteCustomerForUser = async (authHeader, customerId) => {
     };
   }
 
+  const customer = await getCustomerById({ customerId, userId: user.id });
+  if (!customer) return { status: 404, body: { message: "customer not found" } };
+
   const deleted = await deleteCustomerById({ customerId, userId: user.id });
   if (!deleted) return { status: 404, body: { message: "customer not found" } };
+
+  await runAutomations({
+    triggerType: "Customer",
+    subTriggerType: "Deleted",
+    context: { customer, user },
+  });
 
   return { status: 200, body: { message: "customer deleted" } };
 };

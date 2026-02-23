@@ -31,6 +31,7 @@ type FieldType = "string" | "number" | "date" | "boolean";
 
 type Metadata = {
   triggers: string[];
+  customerSubTriggers: string[];
   invoiceSubTriggers: string[];
   operators: string[];
   conditionLogic: Array<"AND" | "OR">;
@@ -84,8 +85,8 @@ const formSchema = z
     trigger: z.enum(["Email Received", "Customer", "Invoice"]),
     subTrigger: z.string().optional().default(""),
     conditionLogic: z.enum(["AND", "OR"]),
-    conditions: z.array(conditionSchema).min(1, "At least one condition is required"),
-    action: z.enum(["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)", "CRM", "Invoice"]),
+    conditions: z.array(conditionSchema),
+    action: z.enum(["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)", "CRM", "Invoice"]),
     subAction: z.string().optional().default(""),
     mailTemplateId: z.string().optional().default(""),
     isActive: z.boolean().default(true),
@@ -95,7 +96,17 @@ const formSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["subTrigger"], message: "Sub-trigger is required for Invoice trigger" });
     }
 
-    if (["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(value.action) && !value.mailTemplateId) {
+    if (value.trigger === "Customer" && !value.subTrigger) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["subTrigger"], message: "Sub-trigger is required for Customer trigger" });
+    }
+
+    const customerSub = value.subTrigger;
+    const requiresConditions = value.trigger === "Invoice" || (value.trigger === "Customer" && !["Created", "Create", "Deleted", "Delete"].includes(customerSub));
+    if (requiresConditions && value.conditions.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["conditions"], message: "At least one condition is required" });
+    }
+
+    if (["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)", "AI Generate (Auto Send)"].includes(value.action) && !value.mailTemplateId) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["mailTemplateId"], message: "Mail template is required" });
     }
 
@@ -232,6 +243,12 @@ export default function Automation() {
     else form.setValue("subAction", "");
   }, [action, form]);
 
+  useEffect(() => {
+    if (trigger === "Email Received") {
+      form.setValue("subTrigger", "");
+    }
+  }, [trigger, form]);
+
   const submitForm = form.handleSubmit(async (values) => {
     try {
       const normalizedConditions = values.conditions.map((condition) => {
@@ -255,9 +272,9 @@ export default function Automation() {
 
       const payload = {
         ...values,
-        subTrigger: values.trigger === "Invoice" ? values.subTrigger : undefined,
+        subTrigger: ["Customer", "Invoice"].includes(values.trigger) ? values.subTrigger : undefined,
         subAction: values.action === "CRM" ? "Upsert CRM" : values.action === "Invoice" ? "Upsert Invoice" : undefined,
-        mailTemplateId: ["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(values.action) ? values.mailTemplateId : undefined,
+        mailTemplateId: ["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(values.action) ? values.mailTemplateId : undefined,
         conditions: normalizedConditions,
       };
 
@@ -398,12 +415,16 @@ export default function Automation() {
                     <SelectContent>{metadata?.triggers.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                {trigger === "Invoice" && (
+                {(trigger === "Invoice" || trigger === "Customer") && (
                   <div>
                     <Label>Sub Trigger</Label>
                     <Select value={form.watch("subTrigger")} onValueChange={(value) => form.setValue("subTrigger", value)}>
                       <SelectTrigger><SelectValue placeholder="Select sub trigger" /></SelectTrigger>
-                      <SelectContent>{metadata?.invoiceSubTriggers.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                      <SelectContent>
+                        {(trigger === "Invoice" ? metadata?.invoiceSubTriggers : metadata?.customerSubTriggers)?.map((item) => (
+                          <SelectItem key={item} value={item}>{item}</SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
                     <p className="text-xs text-destructive">{form.formState.errors.subTrigger?.message}</p>
                   </div>
@@ -480,7 +501,7 @@ export default function Automation() {
                       </SelectContent>
                     </Select>
 
-                    <Button type="button" variant="outline" onClick={() => remove(index)} disabled={fields.length <= 1}>Remove</Button>
+                    <Button type="button" variant="outline" onClick={() => remove(index)} disabled={false}>Remove</Button>
                   </div>
                 );
               })}
@@ -514,7 +535,7 @@ export default function Automation() {
                   </div>
                 )}
 
-                {["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(action) && (
+                {["Send Mail", "AI Generate (Auto Send)", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(action) && (
                   <div>
                     <Label>Mail Template</Label>
                     <Select value={form.watch("mailTemplateId") || undefined} onValueChange={(value) => form.setValue("mailTemplateId", value)}>
