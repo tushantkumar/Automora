@@ -56,14 +56,27 @@ export const getAutomationEntityFields = async () => {
     }));
 };
 
-export const getAutomationByName = async ({ userId, name }) => {
+export const getAutomationByName = async ({ userId, name, excludeAutomationId = null }) => {
   const result = await pool.query(
     `SELECT ${AUTOMATION_SELECT}
      FROM auth_automations
      WHERE user_id = $1
        AND LOWER(name) = LOWER($2)
+       AND ($3::text IS NULL OR id <> $3)
      LIMIT 1`,
-    [userId, String(name || "").trim()],
+    [userId, String(name || "").trim(), excludeAutomationId],
+  );
+  return result.rows[0] ?? null;
+};
+
+export const getAutomationById = async ({ userId, automationId }) => {
+  const result = await pool.query(
+    `SELECT ${AUTOMATION_SELECT}
+     FROM auth_automations
+     WHERE user_id = $1
+       AND id = $2
+     LIMIT 1`,
+    [userId, automationId],
   );
   return result.rows[0] ?? null;
 };
@@ -104,21 +117,82 @@ export const createAutomation = async ({
   return result.rows[0] ?? null;
 };
 
-export const listAutomationsByUserId = async ({ userId, limit = 10, offset = 0 }) => {
+export const updateAutomationById = async ({
+  automationId,
+  userId,
+  name,
+  triggerType,
+  subTrigger,
+  conditionLogic,
+  conditions,
+  actionType,
+  actionSubType,
+  mailTemplateId,
+  isActive,
+}) => {
+  const result = await pool.query(
+    `UPDATE auth_automations
+     SET name = $1,
+         trigger_type = $2,
+         sub_trigger = $3,
+         condition_logic = $4,
+         conditions = $5::jsonb,
+         action_type = $6,
+         action_sub_type = $7,
+         mail_template_id = $8,
+         is_active = $9,
+         updated_at = NOW()
+     WHERE id = $10
+       AND user_id = $11
+     RETURNING ${AUTOMATION_SELECT}`,
+    [
+      name,
+      triggerType,
+      subTrigger,
+      conditionLogic,
+      JSON.stringify(conditions),
+      actionType,
+      actionSubType,
+      mailTemplateId,
+      Boolean(isActive),
+      automationId,
+      userId,
+    ],
+  );
+
+  return result.rows[0] ?? null;
+};
+
+export const deleteAutomationById = async ({ automationId, userId }) => {
+  const result = await pool.query(
+    `DELETE FROM auth_automations
+     WHERE id = $1
+       AND user_id = $2`,
+    [automationId, userId],
+  );
+
+  return result.rowCount > 0;
+};
+
+export const listAutomationsByUserId = async ({ userId, search = "", limit = 10, offset = 0 }) => {
+  const normalizedSearch = String(search || "").trim();
+
   const [rows, countResult] = await Promise.all([
     pool.query(
       `SELECT ${AUTOMATION_SELECT}
        FROM auth_automations
        WHERE user_id = $1
+         AND ($2::text = '' OR name ILIKE '%' || $2 || '%')
        ORDER BY created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset],
+       LIMIT $3 OFFSET $4`,
+      [userId, normalizedSearch, limit, offset],
     ),
     pool.query(
       `SELECT COUNT(*)::int AS total
        FROM auth_automations
-       WHERE user_id = $1`,
-      [userId],
+       WHERE user_id = $1
+         AND ($2::text = '' OR name ILIKE '%' || $2 || '%')`,
+      [userId, normalizedSearch],
     ),
   ]);
 

@@ -2,10 +2,13 @@ import { getUserBySessionToken } from "../db/authRepository.js";
 import { createUserId } from "../utils/auth.js";
 import {
   createAutomation,
+  deleteAutomationById,
+  getAutomationById,
   getAutomationByName,
   getAutomationEntityFields,
   listAutomationsByUserId,
   setAutomationActiveState,
+  updateAutomationById,
 } from "../db/automationRepository.js";
 import { listMailTemplatesByUserId } from "../db/mailTemplateRepository.js";
 
@@ -65,9 +68,11 @@ const validateConditions = (conditions, fieldsMap) => {
     const entity = String(condition?.entity || "").toLowerCase();
     const field = String(condition?.field || "");
     const operator = String(condition?.operator || "").toLowerCase();
+    const joiner = String(condition?.joiner || "AND").toUpperCase();
 
     if (!entity || !field || !operator) return "Each condition requires entity, field and operator";
     if (!ALLOWED_OPERATORS.includes(operator)) return `Unsupported operator: ${operator}`;
+    if (!["AND", "OR"].includes(joiner)) return "Condition joiner must be AND or OR";
 
     const fieldDef = fieldsMap.get(`${entity}.${field}`);
     if (!fieldDef) return `Field ${field} does not exist in ${entity}`;
@@ -84,6 +89,77 @@ const validateConditions = (conditions, fieldsMap) => {
   return null;
 };
 
+const validateAndNormalizePayload = async ({ userId, payload, excludeAutomationId = null }) => {
+  const name = String(payload?.name || "").trim();
+  const triggerType = String(payload?.trigger || "").trim();
+  const subTrigger = payload?.subTrigger ? String(payload.subTrigger).trim() : null;
+  const conditionLogic = String(payload?.conditionLogic || "AND").trim().toUpperCase();
+  const actionType = String(payload?.action || "").trim();
+  const actionSubType = payload?.subAction ? String(payload.subAction).trim() : null;
+  const mailTemplateId = payload?.mailTemplateId ? String(payload.mailTemplateId).trim() : null;
+  const conditions = Array.isArray(payload?.conditions) ? payload.conditions : [];
+  const isActive = payload?.isActive !== false;
+
+  if (!name || !ALLOWED_TRIGGERS.includes(triggerType) || !ALLOWED_ACTIONS.includes(actionType)) {
+    return { error: "name, trigger and action are required" };
+  }
+
+  const duplicate = await getAutomationByName({ userId, name, excludeAutomationId });
+  if (duplicate) return { error: "automation name already exists", status: 409 };
+
+  if (triggerType === "Invoice" && (!subTrigger || !ALLOWED_SUB_TRIGGERS.includes(subTrigger))) {
+    return { error: "Invoice trigger requires a valid sub-trigger" };
+  }
+
+  if (triggerType !== "Invoice" && subTrigger) {
+    return { error: "Sub-trigger is only allowed when trigger is Invoice" };
+  }
+
+  const metadata = await getAutomationEntityFields();
+  const fieldsMap = new Map(metadata.map((item) => [`${item.entity}.${item.key}`, item]));
+
+  const conditionValidationError = validateConditions(conditions, fieldsMap);
+  if (conditionValidationError) return { error: conditionValidationError };
+  if (!["AND", "OR"].includes(conditionLogic)) return { error: "Condition logic must be AND or OR" };
+
+  if (["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(actionType)) {
+    if (!mailTemplateId) return { error: "Mail template is required for selected action" };
+
+    const templates = await listMailTemplatesByUserId(userId);
+    const exists = templates.some((template) => template.id === mailTemplateId);
+    if (!exists) return { error: "Selected mail template does not exist" };
+  }
+
+  if (actionType === "CRM" && actionSubType !== "Upsert CRM") {
+    return { error: "CRM action requires Upsert CRM sub-action" };
+  }
+
+  if (actionType === "Invoice" && actionSubType !== "Upsert Invoice") {
+    return { error: "Invoice action requires Upsert Invoice sub-action" };
+  }
+
+  if (!["CRM", "Invoice"].includes(actionType) && actionSubType) {
+    return { error: "Sub-action is only allowed for CRM and Invoice actions" };
+  }
+
+  return {
+    value: {
+      name,
+      triggerType,
+      subTrigger,
+      conditionLogic,
+      conditions: conditions.map((condition) => ({
+        ...condition,
+        joiner: String(condition?.joiner || "AND").toUpperCase(),
+      })),
+      actionType,
+      actionSubType,
+      mailTemplateId,
+      isActive,
+    },
+  };
+};
+
 export const getAutomationBuilderMetadataForUser = async (authHeader) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
@@ -98,6 +174,7 @@ export const getAutomationBuilderMetadataForUser = async (authHeader) => {
       actions: ALLOWED_ACTIONS,
       operators: ALLOWED_OPERATORS,
       conditionLogic: ["AND", "OR"],
+      conditionJoiners: ["AND", "OR"],
       fields,
       templates,
     },
@@ -110,9 +187,11 @@ export const listAutomationsForUser = async (authHeader, query = {}) => {
 
   const page = Math.max(Number(query.page || 1), 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize || 10), 1), 50);
+  const search = String(query.search || "").trim();
 
   const { rows, total } = await listAutomationsByUserId({
     userId: user.id,
+    search,
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
@@ -131,6 +210,51 @@ export const listAutomationsForUser = async (authHeader, query = {}) => {
   };
 };
 
+export const createAutomationForUser = async (authHeader, payload) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const parsed = await validateAndNormalizePayload({ userId: user.id, payload });
+  if (parsed.error) return { status: parsed.status || 400, body: { message: parsed.error } };
+
+  const automation = await createAutomation({
+    id: createUserId(),
+    userId: user.id,
+    ...parsed.value,
+  });
+
+  return { status: 201, body: { message: "automation created", automation } };
+};
+
+export const updateAutomationForUser = async (authHeader, automationId, payload) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const existing = await getAutomationById({ userId: user.id, automationId });
+  if (!existing) return { status: 404, body: { message: "automation not found" } };
+
+  const parsed = await validateAndNormalizePayload({ userId: user.id, payload, excludeAutomationId: automationId });
+  if (parsed.error) return { status: parsed.status || 400, body: { message: parsed.error } };
+
+  const automation = await updateAutomationById({
+    automationId,
+    userId: user.id,
+    ...parsed.value,
+  });
+
+  return { status: 200, body: { message: "automation updated", automation } };
+};
+
+export const deleteAutomationForUser = async (authHeader, automationId) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const deleted = await deleteAutomationById({ automationId, userId: user.id });
+  if (!deleted) return { status: 404, body: { message: "automation not found" } };
+
+  return { status: 200, body: { message: "automation deleted" } };
+};
+
 export const toggleAutomationForUser = async (authHeader, automationId, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
@@ -145,81 +269,4 @@ export const toggleAutomationForUser = async (authHeader, automationId, payload 
   if (!automation) return { status: 404, body: { message: "automation not found" } };
 
   return { status: 200, body: { message: "automation updated", automation } };
-};
-
-export const createAutomationForUser = async (authHeader, payload) => {
-  const user = await getAuthorizedUser(authHeader);
-  if (!user) return { status: 401, body: { message: "unauthorized" } };
-
-  const name = String(payload?.name || "").trim();
-  const triggerType = String(payload?.trigger || "").trim();
-  const subTrigger = payload?.subTrigger ? String(payload.subTrigger).trim() : null;
-  const conditionLogic = String(payload?.conditionLogic || "AND").trim().toUpperCase();
-  const actionType = String(payload?.action || "").trim();
-  const actionSubType = payload?.subAction ? String(payload.subAction).trim() : null;
-  const mailTemplateId = payload?.mailTemplateId ? String(payload.mailTemplateId).trim() : null;
-  const conditions = Array.isArray(payload?.conditions) ? payload.conditions : [];
-  const isActive = payload?.isActive !== false;
-
-  if (!name || !ALLOWED_TRIGGERS.includes(triggerType) || !ALLOWED_ACTIONS.includes(actionType)) {
-    return { status: 400, body: { message: "name, trigger and action are required" } };
-  }
-
-  const duplicate = await getAutomationByName({ userId: user.id, name });
-  if (duplicate) {
-    return { status: 409, body: { message: "automation name already exists" } };
-  }
-
-  if (triggerType === "Invoice") {
-    if (!subTrigger || !ALLOWED_SUB_TRIGGERS.includes(subTrigger)) {
-      return { status: 400, body: { message: "Invoice trigger requires a valid sub-trigger" } };
-    }
-  }
-
-  if (triggerType !== "Invoice" && subTrigger) {
-    return { status: 400, body: { message: "Sub-trigger is only allowed when trigger is Invoice" } };
-  }
-
-  const metadata = await getAutomationEntityFields();
-  const fieldsMap = new Map(metadata.map((item) => [`${item.entity}.${item.key}`, item]));
-
-  const conditionValidationError = validateConditions(conditions, fieldsMap);
-  if (conditionValidationError) return { status: 400, body: { message: conditionValidationError } };
-  if (!["AND", "OR"].includes(conditionLogic)) return { status: 400, body: { message: "Condition logic must be AND or OR" } };
-
-  if (["Send Mail", "AI Generate (Auto Reply)", "AI Generate (Draft)"].includes(actionType)) {
-    if (!mailTemplateId) return { status: 400, body: { message: "Mail template is required for selected action" } };
-
-    const templates = await listMailTemplatesByUserId(user.id);
-    const exists = templates.some((template) => template.id === mailTemplateId);
-    if (!exists) return { status: 400, body: { message: "Selected mail template does not exist" } };
-  }
-
-  if (actionType === "CRM" && actionSubType !== "Upsert CRM") {
-    return { status: 400, body: { message: "CRM action requires Upsert CRM sub-action" } };
-  }
-
-  if (actionType === "Invoice" && actionSubType !== "Upsert Invoice") {
-    return { status: 400, body: { message: "Invoice action requires Upsert Invoice sub-action" } };
-  }
-
-  if (!["CRM", "Invoice"].includes(actionType) && actionSubType) {
-    return { status: 400, body: { message: "Sub-action is only allowed for CRM and Invoice actions" } };
-  }
-
-  const automation = await createAutomation({
-    id: createUserId(),
-    userId: user.id,
-    name,
-    triggerType,
-    subTrigger,
-    conditionLogic,
-    conditions,
-    actionType,
-    actionSubType,
-    mailTemplateId,
-    isActive,
-  });
-
-  return { status: 201, body: { message: "automation created", automation } };
 };

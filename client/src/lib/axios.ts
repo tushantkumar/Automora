@@ -29,10 +29,23 @@ export const axios = {
       body: JSON.stringify(body ?? {}),
     }),
 
+  put: <T>(url: string, body?: unknown, options: { headers?: Record<string, string> } = {}) =>
+    request<T>(url, {
+      method: "PUT",
+      headers: { ...jsonHeaders, ...(options.headers || {}) },
+      body: JSON.stringify(body ?? {}),
+    }),
+
   patch: <T>(url: string, body?: unknown, options: { headers?: Record<string, string> } = {}) =>
     request<T>(url, {
       method: "PATCH",
       headers: { ...jsonHeaders, ...(options.headers || {}) },
       body: JSON.stringify(body ?? {}),
+    }),
+
+  delete: <T>(url: string, options: { headers?: Record<string, string> } = {}) =>
+    request<T>(url, {
+      method: "DELETE",
+      headers: options.headers,
     }),
 };

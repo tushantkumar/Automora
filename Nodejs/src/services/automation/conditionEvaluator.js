@@ -59,12 +59,23 @@ export const evaluateCondition = ({ operator, actual, expected, type }) => {
 export const evaluateConditions = ({ conditions, logic = "AND", fieldTypeMap, context }) => {
   if (!Array.isArray(conditions) || conditions.length === 0) return true;
 
-  const results = conditions.map((condition) => {
+  let accumulator = null;
+
+  for (let index = 0; index < conditions.length; index += 1) {
+    const condition = conditions[index];
     const key = `${String(condition.entity || "").toLowerCase()}.${String(condition.field || "")}`;
     const type = fieldTypeMap.get(key) || "string";
     const actual = context?.[condition.entity]?.[condition.field];
-    return evaluateCondition({ operator: condition.operator, actual, expected: condition.value, type });
-  });
+    const current = evaluateCondition({ operator: condition.operator, actual, expected: condition.value, type });
 
-  return logic === "OR" ? results.some(Boolean) : results.every(Boolean);
+    if (accumulator === null) {
+      accumulator = current;
+      continue;
+    }
+
+    const joiner = String(condition.joiner || logic || "AND").toUpperCase();
+    accumulator = joiner === "OR" ? accumulator || current : accumulator && current;
+  }
+
+  return Boolean(accumulator);
 };

@@ -1,8 +1,10 @@
 import {
   createAutomationForUser,
+  deleteAutomationForUser,
   getAutomationBuilderMetadataForUser,
   listAutomationsForUser,
   toggleAutomationForUser,
+  updateAutomationForUser,
 } from "../services/automationService.js";
 
 export const getAutomationMetadataHandler = async (req, res) => {
@@ -17,6 +19,16 @@ export const listAutomationsHandler = async (req, res) => {
 
 export const createAutomationHandler = async (req, res) => {
   const result = await createAutomationForUser(req.headers.authorization, req.body || {});
+  return res.status(result.status).json(result.body);
+};
+
+export const updateAutomationHandler = async (req, res) => {
+  const result = await updateAutomationForUser(req.headers.authorization, req.params.automationId, req.body || {});
+  return res.status(result.status).json(result.body);
+};
+
+export const deleteAutomationHandler = async (req, res) => {
+  const result = await deleteAutomationForUser(req.headers.authorization, req.params.automationId);
   return res.status(result.status).json(result.body);
 };
 
