@@ -1,3 +1,4 @@
+import { google } from "googleapis";
 import { createUserId } from "../utils/auth.js";
 import { getUserBySessionToken } from "../db/authRepository.js";
 import {
@@ -13,7 +14,6 @@ import {
   upsertInboxEmails,
 } from "../db/emailIntegrationRepository.js";
 import { runAutomations } from "./automation/executionEngine.js";
-import { isSmtpConfigured, sendBasicEmail } from "./emailService.js";
 import {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
@@ -45,6 +45,121 @@ const decodeState = (value) => {
   } catch {
     return null;
   }
+};
+
+
+const createOAuth2Client = () => new google.auth.OAuth2(
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  GOOGLE_REDIRECT_URI,
+);
+
+const toIso = (value) => {
+  const date = new Date(Number(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+const upsertRefreshedGmailTokens = async ({ userId, integration, credentials }) => {
+  const nextAccessToken = String(credentials?.access_token || "").trim() || integration.access_token;
+  const nextRefreshToken = String(credentials?.refresh_token || "").trim() || integration.refresh_token;
+  const nextTokenExpiry = credentials?.expiry_date ? toIso(credentials.expiry_date) : integration.token_expiry;
+
+  if (
+    nextAccessToken !== integration.access_token
+    || nextRefreshToken !== integration.refresh_token
+    || String(nextTokenExpiry || "") !== String(integration.token_expiry || "")
+  ) {
+    await upsertEmailIntegration({
+      userId,
+      provider: "gmail",
+      accessToken: nextAccessToken,
+      refreshToken: nextRefreshToken,
+      tokenExpiry: nextTokenExpiry,
+      connectedEmail: integration.connected_email || null,
+    });
+  }
+
+  return {
+    accessToken: nextAccessToken,
+    refreshToken: nextRefreshToken,
+    tokenExpiry: nextTokenExpiry,
+  };
+};
+
+const getAuthorizedGmailClient = async ({ userId, integration }) => {
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({
+    access_token: integration.access_token || undefined,
+    refresh_token: integration.refresh_token || undefined,
+    expiry_date: integration.token_expiry ? new Date(integration.token_expiry).getTime() : undefined,
+  });
+
+  const token = await oauth2Client.getAccessToken();
+  if (!token?.token && !oauth2Client.credentials?.access_token) {
+    throw new Error("Unable to obtain Gmail access token");
+  }
+
+  const persisted = await upsertRefreshedGmailTokens({ userId, integration, credentials: oauth2Client.credentials });
+  oauth2Client.setCredentials({
+    access_token: persisted.accessToken,
+    refresh_token: persisted.refreshToken || undefined,
+    expiry_date: persisted.tokenExpiry ? new Date(persisted.tokenExpiry).getTime() : undefined,
+  });
+
+  return {
+    oauth2Client,
+    accessToken: String(token?.token || persisted.accessToken || oauth2Client.credentials?.access_token || "").trim(),
+  };
+};
+
+const encodeBase64Url = (value) =>
+  Buffer.from(String(value || ""), "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+
+const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
+  const safeTo = String(to || "").trim();
+  const safeSubject = String(subject || "").trim() || "(no subject)";
+  const safeBody = String(bodyText || "").trim();
+  const safeInReplyTo = String(inReplyTo || "").trim();
+  const safeReferences = String(references || "").trim();
+
+  const headers = [
+    `To: ${safeTo}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "MIME-Version: 1.0",
+    `Subject: ${safeSubject}`,
+  ];
+
+  if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
+  if (safeReferences) headers.push(`References: ${safeReferences}`);
+
+  return [...headers, "", safeBody].join("\r\n");
+};
+
+const getHeaderValue = (headers, name) => {
+  const target = String(name || "").toLowerCase();
+  const row = (Array.isArray(headers) ? headers : []).find((header) => String(header?.name || "").toLowerCase() === target);
+  return String(row?.value || "").trim();
+};
+
+const fetchGmailReplyContext = async ({ accessToken, messageId }) => {
+  if (!messageId) return null;
+
+  const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await response.json();
+  if (!response.ok) return null;
+
+  const headers = Array.isArray(data?.payload?.headers) ? data.payload.headers : [];
+  return {
+    threadId: String(data?.threadId || "").trim() || null,
+    messageIdHeader: getHeaderValue(headers, "Message-ID") || null,
+    referencesHeader: getHeaderValue(headers, "References") || null,
+  };
 };
 
 const parseAddressHeader = (value) => {
@@ -142,34 +257,24 @@ const buildGmailAuthUrl = ({ token }) => {
 };
 
 const exchangeCodeForTokens = async (code) => {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
-      redirect_uri: GOOGLE_REDIRECT_URI,
-      grant_type: "authorization_code",
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok || !data?.access_token) {
-    throw new Error(data?.error_description || data?.error || "Unable to complete Gmail authorization");
+  const oauth2Client = createOAuth2Client();
+  const { tokens } = await oauth2Client.getToken(code);
+  if (!tokens?.access_token) {
+    throw new Error("Unable to complete Gmail authorization");
   }
 
-  return data;
+  return {
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token || null,
+    expires_in: tokens.expiry_date ? Math.max(0, Math.round((Number(tokens.expiry_date) - Date.now()) / 1000)) : null,
+    expiry_date: tokens.expiry_date || null,
+  };
 };
 
-const fetchGmailProfile = async (accessToken) => {
-  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  const data = await response.json();
-  if (!response.ok) throw new Error("Unable to fetch Gmail profile");
-  return data;
+const fetchGmailProfile = async (oauth2Client) => {
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const response = await gmail.users.getProfile({ userId: "me" });
+  return response?.data || {};
 };
 
 const fetchGmailMessages = async (accessToken, maxResults = 50) => {
@@ -328,9 +433,14 @@ export const handleGmailCallback = async ({ code, state }) => {
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
   const tokenData = await exchangeCodeForTokens(code);
-  const profile = await fetchGmailProfile(tokenData.access_token);
-  const expiryMs = Number(tokenData.expires_in || 0) * 1000;
-  const tokenExpiry = expiryMs > 0 ? new Date(Date.now() + expiryMs).toISOString() : null;
+  const tokenExpiry = tokenData.expiry_date ? new Date(Number(tokenData.expiry_date)).toISOString() : null;
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token || undefined,
+    expiry_date: tokenData.expiry_date || undefined,
+  });
+  const profile = await fetchGmailProfile(oauth2Client);
 
   await upsertEmailIntegration({
     userId: user.id,
@@ -365,7 +475,8 @@ export const syncGmailEmails = async (authHeader) => {
   }
 
   try {
-    const emails = await fetchGmailMessages(integration.access_token, 50);
+    const { accessToken } = await getAuthorizedGmailClient({ userId: user.id, integration });
+    const emails = await fetchGmailMessages(accessToken, 50);
     const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
     await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
     await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: integration.connected_email || "", provider: "gmail" });
@@ -405,8 +516,9 @@ export const getInboxThread = async (authHeader, externalId = "") => {
   });
 
   try {
+    const { accessToken } = await getAuthorizedGmailClient({ userId: user.id, integration });
     const threadMessages = await fetchGmailThreadMessages({
-      accessToken: integration.access_token,
+      accessToken,
       messageId,
       connectedEmail: integration.connected_email || "",
     });
@@ -448,13 +560,6 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     return { status: 404, body: { message: "Gmail is not connected" } };
   }
 
-  if (!isSmtpConfigured()) {
-    return {
-      status: 400,
-      body: { message: "SMTP is not configured. Configure Auto-X SMTP to send replies from your Auto-X mailbox." },
-    };
-  }
-
   const to = String(payload.to || "").trim();
   const subject = String(payload.subject || "").trim();
   const bodyText = String(payload.body || "").trim();
@@ -481,10 +586,31 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
   }
 
   try {
-    await sendBasicEmail({
-      to,
-      subject,
-      text: bodyText,
+    const { oauth2Client, accessToken } = await getAuthorizedGmailClient({ userId: user.id, integration });
+    const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+    const profile = await fetchGmailProfile(oauth2Client);
+    const connectedEmail = String(integration.connected_email || "").trim().toLowerCase();
+    const senderEmail = String(profile?.emailAddress || "").trim().toLowerCase();
+    if (connectedEmail && senderEmail && connectedEmail !== senderEmail) {
+      return { status: 409, body: { message: "Connected Gmail account changed. Please reconnect Gmail." } };
+    }
+
+    const replyContext = await fetchGmailReplyContext({
+      accessToken,
+      messageId: replyToExternalId,
+    });
+
+    const inReplyTo = replyContext?.messageIdHeader || "";
+    const references = [replyContext?.referencesHeader, replyContext?.messageIdHeader].filter(Boolean).join(" ").trim();
+    const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references }));
+
+    const response = await gmail.users.messages.send({
+      userId: "me",
+      requestBody: {
+        raw,
+        ...(replyContext?.threadId ? { threadId: replyContext.threadId } : {}),
+      },
     });
 
     if (replyToExternalId) {
@@ -508,10 +634,12 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
       status: 200,
       body: {
         message: "Email sent successfully",
+        gmailMessageId: String(response?.data?.id || "") || null,
+        senderEmail: String(profile?.emailAddress || integration.connected_email || "") || null,
       },
     };
   } catch {
-    return { status: 502, body: { message: "Unable to send email from Auto-X mailbox" } };
+    return { status: 502, body: { message: "Unable to send email via connected Gmail account" } };
   }
 };
 
