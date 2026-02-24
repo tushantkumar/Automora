@@ -1,3 +1,4 @@
+import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import { getUserBySessionToken } from "../db/authRepository.js";
 import {
@@ -152,6 +153,102 @@ const generateInvoicePdfBuffer = async ({ invoice }) => {
   doc.end();
   return bufferPromise;
 };
+
+
+const parseInvoiceLineItems = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const styleExcelHeader = (row) => {
+  row.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4F46E5" } };
+  row.alignment = { vertical: "middle", horizontal: "center" };
+  row.height = 20;
+};
+
+const buildInvoiceExcelBuffer = async ({ invoices }) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Auto-X";
+  workbook.created = new Date();
+
+  const invoiceSheet = workbook.addWorksheet("Invoices");
+  invoiceSheet.columns = [
+    { header: "Invoice Number", key: "invoice_number", width: 20 },
+    { header: "Client", key: "client_name", width: 26 },
+    { header: "Issue Date", key: "issue_date", width: 16 },
+    { header: "Due Date", key: "due_date", width: 16 },
+    { header: "Status", key: "status", width: 14 },
+    { header: "Tax Rate %", key: "tax_rate", width: 12 },
+    { header: "Amount", key: "amount", width: 14 },
+    { header: "Notes", key: "notes", width: 36 },
+  ];
+  styleExcelHeader(invoiceSheet.getRow(1));
+
+  const lineItemSheet = workbook.addWorksheet("Line Items");
+  lineItemSheet.columns = [
+    { header: "Invoice Number", key: "invoice_number", width: 20 },
+    { header: "Description", key: "description", width: 40 },
+    { header: "Quantity", key: "quantity", width: 12 },
+    { header: "Rate", key: "rate", width: 14 },
+    { header: "Total", key: "total", width: 14 },
+  ];
+  styleExcelHeader(lineItemSheet.getRow(1));
+
+  let grandTotal = 0;
+
+  for (const invoice of Array.isArray(invoices) ? invoices : []) {
+    const amount = Number(invoice?.amount || 0);
+    grandTotal += Number.isFinite(amount) ? amount : 0;
+
+    invoiceSheet.addRow({
+      invoice_number: String(invoice?.invoice_number || ""),
+      client_name: String(invoice?.client_name || ""),
+      issue_date: String(invoice?.issue_date || "").slice(0, 10),
+      due_date: String(invoice?.due_date || "").slice(0, 10),
+      status: String(invoice?.status || ""),
+      tax_rate: Number(invoice?.tax_rate || 0),
+      amount,
+      notes: String(invoice?.notes || ""),
+    });
+
+    const items = parseInvoiceLineItems(invoice?.line_items);
+    for (const item of items) {
+      const quantity = Number(item?.quantity || 0);
+      const rate = Number(item?.rate || 0);
+      lineItemSheet.addRow({
+        invoice_number: String(invoice?.invoice_number || ""),
+        description: String(item?.description || ""),
+        quantity,
+        rate,
+        total: quantity * rate,
+      });
+    }
+  }
+
+  invoiceSheet.addRow({});
+  const totalRow = invoiceSheet.addRow({ amount: grandTotal, notes: "Grand Total" });
+  totalRow.font = { bold: true };
+
+  [invoiceSheet, lineItemSheet].forEach((sheet) => {
+    sheet.eachRow((row, idx) => {
+      if (idx === 1) return;
+      row.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+    });
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+};
+
 const syncCustomerRevenueById = async ({ userId, customerId }) => {
   const normalizedCustomerId = String(customerId || "").trim();
   if (!normalizedCustomerId) return;
@@ -286,5 +383,33 @@ export const getInvoicePdfForUser = async (authHeader, invoiceId) => {
     };
   } catch {
     return { status: 502, body: { message: "Unable to generate invoice PDF" } };
+  }
+};
+
+
+export const exportInvoicesExcelForUser = async (authHeader, query = {}) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  await markOverdueInvoicesByUserId(user.id);
+
+  const invoices = await listInvoicesByUserId({
+    userId: user.id,
+    invoiceNumber: String(query.invoiceNumber || "").trim(),
+    fromDate: String(query.fromDate || "").trim(),
+    toDate: String(query.toDate || "").trim(),
+  });
+
+  try {
+    const buffer = await buildInvoiceExcelBuffer({ invoices });
+    return {
+      status: 200,
+      body: {
+        buffer,
+        fileName: `invoices-report-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      },
+    };
+  } catch {
+    return { status: 502, body: { message: "Unable to generate invoices Excel" } };
   }
 };
