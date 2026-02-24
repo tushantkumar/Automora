@@ -281,11 +281,11 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
   };
 
   const classification = await classifyIncomingEmail({ body: incoming.body });
-
   const relevantData = { classification };
 
-  if (classification === "Invoice") {
-    const invoiceNumber = extractInvoiceNumber(`${incoming.subject}\n${incoming.body}`);
+  if (classification.category === "Invoice" || classification.invoiceFlag === 'invoicePresent' || classification.invoiceFlag === 'InvoicePresent') {
+    // const invoiceNumber = extractInvoiceNumber(`${incoming.subject}\n${incoming.body}`);
+    const invoiceNumber = classification.invoiceNumber;
     if (invoiceNumber) {
       const invoice = await getInvoiceByNumberForUser({ userId, invoiceNumber });
       if (invoice) {
@@ -298,15 +298,20 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
             contact: invoiceDetails.customer_contact,
           };
         }
+      } else {
+        relevantData?.classification?.category = 'Invoice'
+        relevantData?.classification?.invoiceNumber = null;
+        relevantData?.classification?.invoiceFlag = 'noInvoice';
       }
     }
-  } else {
-    const customer = await getCustomerByEmail({ userId, email: incoming.from });
-    if (customer) {
-      relevantData.customer = customer;
-      const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
-      if (invoice) relevantData.invoice = invoice;
-    }
+  }
+  else {
+  const customer = await getCustomerByEmail({ userId, email: incoming.from });
+  if (customer) {
+    relevantData.customer = customer;
+    // const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
+    // if (invoice) relevantData.invoice = invoice;
+  }
   }
 
   const aiResponse = await generateAutomationContent({
