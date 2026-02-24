@@ -85,10 +85,6 @@ ${String(body || "")}`;
     invoiceNumber = null;
   }
 
-  console.log("category:", category);
-  console.log("invoiceFlag:", invoiceFlag);
-  console.log("invoiceNumber:", invoiceNumber);
-
   return {
     category,
     invoiceFlag,

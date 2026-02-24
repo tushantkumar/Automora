@@ -119,7 +119,7 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
   if (!recipient) throw new Error("No recipient email could be resolved for automation");
 
   const html = buildAutomationEmailLayout({
-    companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Auto-X",
+    companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Automora",
     bodyHtml: toParagraphHtml(finalBodyText),
     invoice,
   });

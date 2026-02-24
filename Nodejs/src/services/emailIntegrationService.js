@@ -377,7 +377,7 @@ const mergeThreadMessages = ({ gmailMessages, localSentMessages, ownerEmail }) =
   const sentRows = (Array.isArray(localSentMessages) ? localSentMessages : []).map((row) => ({
     id: `local-${String(row?.id || "")}`,
     thread_id: null,
-    from_name: owner || "Auto-X",
+    from_name: owner || "Automora",
     from_email: owner || "",
     to: String(row?.to_email || ""),
     subject: String(row?.subject || "(no subject)"),

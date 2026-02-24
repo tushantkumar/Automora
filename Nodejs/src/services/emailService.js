@@ -37,9 +37,9 @@ export const sendVerificationEmail = async (userEmail, verificationToken) => {
   const info = await transporter.sendMail({
     from: SMTP_FROM,
     to: userEmail,
-    subject: "Verify your Auto-X account",
-    text: `Welcome to Auto-X! Verify your account by opening this link: ${verificationLink}`,
-    html: `<p>Welcome to <b>Auto-X</b>!</p><p>Verify your account by clicking <a href="${verificationLink}">this link</a>.</p>`,
+    subject: "Verify your Automora account",
+    text: `Welcome to Automora! Verify your account by opening this link: ${verificationLink}`,
+    html: `<p>Welcome to <b>Automora</b>!</p><p>Verify your account by clicking <a href="${verificationLink}">this link</a>.</p>`,
   });
 
   logMail("verification", userEmail, info.messageId, verificationLink);
@@ -51,7 +51,7 @@ export const sendPasswordResetEmail = async (userEmail, resetToken) => {
   const info = await transporter.sendMail({
     from: SMTP_FROM,
     to: userEmail,
-    subject: "Reset your Auto-X password",
+    subject: "Reset your Automora password",
     text: `Reset your password using this link (valid for 1 hour): ${resetLink}`,
     html: `<p>Reset your password by clicking <a href="${resetLink}">this link</a>. This link is valid for 1 hour.</p>`,
   });
@@ -88,13 +88,13 @@ export const sendAccountDeletionOtpEmail = async ({ userEmail, name, otp, expire
   const info = await transporter.sendMail({
     from: SMTP_FROM,
     to: userEmail,
-    subject: "Auto-X account deletion verification code",
+    subject: "Automora account deletion verification code",
     text: `Hi ${name || "there"},\n\nUse this OTP to confirm account deletion: ${otp}\nThis code is valid for ${minutes} minutes.\n\nIf you did not request account deletion, please ignore this email.`,
     html: `
       <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
         <h2 style="margin:0 0 12px">Delete Account Verification</h2>
         <p>Hi ${safeName},</p>
-        <p>Use the following OTP to confirm deleting your Auto-X account:</p>
+        <p>Use the following OTP to confirm deleting your Automora account:</p>
         <div style="font-size:28px;font-weight:700;letter-spacing:6px;padding:12px 16px;background:#f3f4f6;display:inline-block;border-radius:8px">${safeOtp}</div>
         <p style="margin-top:16px">This code is valid for <b>${minutes} minutes</b>.</p>
         <p>If you did not request this action, you can safely ignore this email.</p>
