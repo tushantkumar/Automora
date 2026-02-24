@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Plus, Mail, Phone, Pencil, Trash2, X } from "lucide-react";
+import { Search, Plus, Mail, Phone, Pencil, Trash2, X, Download } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -129,6 +129,74 @@ export default function Customers() {
     });
     setEditingCustomerId(customer.id);
     setShowForm(true);
+  };
+
+
+
+  const downloadCustomerPdf = async (customerId: string) => {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/customers/${customerId}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        toast({ title: "Unable to download customer report", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || `customer-${customerId}.pdf`;
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Unable to download customer report", description: "Please try again." });
+    }
+  };
+  const downloadCustomersExcel = async () => {
+    if (!token) return;
+
+    try {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set("search", search.trim());
+
+      const response = await fetch(`${AUTH_API_URL}/customers/download/excel${params.toString() ? `?${params.toString()}` : ""}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        toast({ title: "Unable to download customer report", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || "customers-report.xls";
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Unable to download customer report", description: "Please try again." });
+    }
   };
 
   const saveCustomer = async (skipConfirm = false) => {
@@ -321,11 +389,14 @@ export default function Customers() {
       )}
 
       <Card>
-        <div className="p-4 border-b border-border flex items-center justify-between">
+        <div className="p-4 border-b border-border flex flex-wrap items-center gap-3 justify-between">
           <div className="relative w-72">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input placeholder="Search customers..." className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} />
           </div>
+          <Button variant="outline" size="sm" onClick={() => { void downloadCustomersExcel(); }}>
+            <Download className="w-4 h-4 mr-2" /> Export Report
+          </Button>
         </div>
         <Table>
           <TableHeader>
@@ -381,6 +452,7 @@ export default function Customers() {
                     >
                       <Phone className="w-4 h-4" />
                     </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { void downloadCustomerPdf(customer.id); }}><Download className="w-4 h-4" /></Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditForm(customer)}><Pencil className="w-4 h-4" /></Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeCustomer(customer.id)}>
                       <Trash2 className="w-4 h-4" />
