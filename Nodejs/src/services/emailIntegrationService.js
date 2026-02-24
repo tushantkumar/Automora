@@ -1,3 +1,4 @@
+import { google } from "googleapis";
 import { createUserId } from "../utils/auth.js";
 import { getUserBySessionToken } from "../db/authRepository.js";
 import {
@@ -6,8 +7,9 @@ import {
   listEmailIntegrationsByUserId,
   getInboxEmailByExternalId,
   listInboxEmailsByUserId,
+  listInboxSentEmailsByReplyExternalId,
   markInboxEmailReplied,
-  updateInboxEmailClassification,
+  createInboxSentEmail,
   upsertEmailIntegration,
   upsertInboxEmails,
 } from "../db/emailIntegrationRepository.js";
@@ -45,6 +47,122 @@ const decodeState = (value) => {
   }
 };
 
+
+const createOAuth2Client = () => new google.auth.OAuth2(
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  GOOGLE_REDIRECT_URI,
+);
+
+const toIso = (value) => {
+  const date = new Date(Number(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+const upsertRefreshedGmailTokens = async ({ userId, integration, credentials }) => {
+  const nextAccessToken = String(credentials?.access_token || "").trim() || integration.access_token;
+  const nextRefreshToken = String(credentials?.refresh_token || "").trim() || integration.refresh_token;
+  const nextTokenExpiry = credentials?.expiry_date ? toIso(credentials.expiry_date) : integration.token_expiry;
+
+  if (
+    nextAccessToken !== integration.access_token
+    || nextRefreshToken !== integration.refresh_token
+    || String(nextTokenExpiry || "") !== String(integration.token_expiry || "")
+  ) {
+    await upsertEmailIntegration({
+      userId,
+      provider: "gmail",
+      accessToken: nextAccessToken,
+      refreshToken: nextRefreshToken,
+      tokenExpiry: nextTokenExpiry,
+      connectedEmail: integration.connected_email || null,
+    });
+  }
+
+  return {
+    accessToken: nextAccessToken,
+    refreshToken: nextRefreshToken,
+    tokenExpiry: nextTokenExpiry,
+  };
+};
+
+const getAuthorizedGmailClient = async ({ userId, integration }) => {
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({
+    access_token: integration.access_token || undefined,
+    refresh_token: integration.refresh_token || undefined,
+    expiry_date: integration.token_expiry ? new Date(integration.token_expiry).getTime() : undefined,
+  });
+
+  const token = await oauth2Client.getAccessToken();
+  if (!token?.token && !oauth2Client.credentials?.access_token) {
+    throw new Error("Unable to obtain Gmail access token");
+  }
+
+  const persisted = await upsertRefreshedGmailTokens({ userId, integration, credentials: oauth2Client.credentials });
+  oauth2Client.setCredentials({
+    access_token: persisted.accessToken,
+    refresh_token: persisted.refreshToken || undefined,
+    expiry_date: persisted.tokenExpiry ? new Date(persisted.tokenExpiry).getTime() : undefined,
+  });
+
+  return {
+    oauth2Client,
+    accessToken: String(token?.token || persisted.accessToken || oauth2Client.credentials?.access_token || "").trim(),
+  };
+};
+
+const encodeBase64Url = (value) =>
+  Buffer.from(String(value || ""), "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+
+const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
+  const safeTo = String(to || "").trim();
+  const safeSubject = String(subject || "").trim() || "(no subject)";
+  const safeBody = String(bodyText || "").trim();
+  const safeInReplyTo = String(inReplyTo || "").trim();
+  const safeReferences = String(references || "").trim();
+
+  const headers = [
+    `To: ${safeTo}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "MIME-Version: 1.0",
+    `Subject: ${safeSubject}`,
+  ];
+
+  if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
+  if (safeReferences) headers.push(`References: ${safeReferences}`);
+
+  return [...headers, "", safeBody].join("\r\n");
+};
+
+const getHeaderValue = (headers, name) => {
+  const target = String(name || "").toLowerCase();
+  const row = (Array.isArray(headers) ? headers : []).find((header) => String(header?.name || "").toLowerCase() === target);
+  return String(row?.value || "").trim();
+};
+
+const fetchGmailReplyContext = async ({ gmail, messageId }) => {
+  if (!messageId) return null;
+
+  const response = await gmail.users.messages.get({
+    userId: "me",
+    id: messageId,
+    format: "metadata",
+    metadataHeaders: ["Message-ID", "References"],
+  });
+
+  const headers = Array.isArray(response?.data?.payload?.headers) ? response.data.payload.headers : [];
+  return {
+    threadId: String(response?.data?.threadId || "").trim() || null,
+    messageIdHeader: getHeaderValue(headers, "Message-ID") || null,
+    referencesHeader: getHeaderValue(headers, "References") || null,
+  };
+};
+
 const parseAddressHeader = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return { fromName: "", fromEmail: "" };
@@ -64,85 +182,7 @@ const processedIncomingEmailIds = new Set();
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
-const EMAIL_CATEGORIES = ["INVOICE", "QUERY", "SUPPORT", "CUSTOMER", "OTHER"];
-
-const classifyEmailWithOllama = async (emailBody) => {
-  const prompt = `You are an email classification assistant.
-
-Classify this email into ONE of the following:
-- INVOICE
-- QUERY
-- SUPPORT
-- CUSTOMER
-- OTHER
-
-Return ONLY the category name.
-Also return confidence percentage.
-
-Email Content:
-${String(emailBody || "")}
-
-Return JSON:
-{
-  "category": "...",
-  "confidence": 0.92
-}`;
-
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt,
-      stream: false,
-      format: "json",
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error || "Ollama classification failed");
-  }
-
-  const raw = String(data?.response || "").trim();
-  const parsed = JSON.parse(raw || "{}");
-  const category = String(parsed?.category || "").trim().toUpperCase();
-  const confidenceRaw = Number(parsed?.confidence);
-  const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0;
-
-  return {
-    category: EMAIL_CATEGORIES.includes(category) ? category : "OTHER",
-    confidence,
-  };
-};
-
-const classifyAndPersistInboxEmails = async ({ userId, provider, emails }) => {
-  for (const email of Array.isArray(emails) ? emails : []) {
-    const externalId = String(email?.externalId || "").trim();
-    if (!externalId) continue;
-
-    try {
-      const classification = await classifyEmailWithOllama(String(email?.snippet || ""));
-      await updateInboxEmailClassification({
-        userId,
-        provider,
-        externalId,
-        category: classification.category,
-        confidenceScore: classification.confidence,
-      });
-    } catch {
-      await updateInboxEmailClassification({
-        userId,
-        provider,
-        externalId,
-        category: "OTHER",
-        confidenceScore: 0,
-      });
-    }
-  }
-};
-
-const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "" }) => {
+const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "", provider = "gmail" }) => {
   const rows = Array.isArray(emails) ? emails : [];
   const normalizedOwnerEmail = normalizeEmail(ownerEmail || user?.email || "");
   const executionResults = [];
@@ -152,6 +192,13 @@ const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "
     const senderEmail = normalizeEmail(email?.fromEmail);
     if (!externalId || processedIncomingEmailIds.has(`${user.id}:${externalId}`)) continue;
     if (normalizedOwnerEmail && senderEmail && senderEmail === normalizedOwnerEmail) continue;
+
+    const existingInboxEmail = await getInboxEmailByExternalId({
+      userId: user.id,
+      provider,
+      externalId,
+    });
+    if (existingInboxEmail?.replied_at) continue;
 
     processedIncomingEmailIds.add(`${user.id}:${externalId}`);
     if (processedIncomingEmailIds.size > 5000) {
@@ -176,7 +223,29 @@ const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "
       },
     });
 
-    executionResults.push({ externalId, results });
+    const sentResults = (Array.isArray(results) ? results : []).filter((item) => String(item?.result?.mode || "").toLowerCase() === "sent");
+    const hasSentReply = sentResults.length > 0;
+
+    for (const sentResult of sentResults) {
+      await createInboxSentEmail({
+        userId: user.id,
+        provider,
+        replyToExternalId: externalId,
+        toEmail: String(sentResult?.result?.to || email?.fromEmail || "").trim(),
+        subject: String(sentResult?.result?.subject || email?.subject || "(no subject)").trim(),
+        snippet: String(sentResult?.result?.body || "").trim(),
+      });
+    }
+
+    if (hasSentReply) {
+      await markInboxEmailReplied({
+        userId: user.id,
+        provider,
+        externalId,
+      });
+    }
+
+    executionResults.push({ externalId, results, hasSentReply });
   }
 
   return executionResults;
@@ -196,63 +265,53 @@ const buildGmailAuthUrl = ({ token }) => {
 };
 
 const exchangeCodeForTokens = async (code) => {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
-      redirect_uri: GOOGLE_REDIRECT_URI,
-      grant_type: "authorization_code",
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok || !data?.access_token) {
-    throw new Error(data?.error_description || data?.error || "Unable to complete Gmail authorization");
+  const oauth2Client = createOAuth2Client();
+  const { tokens } = await oauth2Client.getToken(code);
+  if (!tokens?.access_token) {
+    throw new Error("Unable to complete Gmail authorization");
   }
 
-  return data;
+  return {
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token || null,
+    expires_in: tokens.expiry_date ? Math.max(0, Math.round((Number(tokens.expiry_date) - Date.now()) / 1000)) : null,
+    expiry_date: tokens.expiry_date || null,
+  };
 };
 
-const fetchGmailProfile = async (accessToken) => {
-  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  const data = await response.json();
-  if (!response.ok) throw new Error("Unable to fetch Gmail profile");
-  return data;
+const fetchGmailProfile = async (oauth2Client) => {
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const response = await gmail.users.getProfile({ userId: "me" });
+  return response?.data || {};
 };
 
-const fetchGmailMessages = async (accessToken, maxResults = 50) => {
-  const listResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=in%3Ainbox`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+const fetchGmailMessages = async ({ gmail, maxResults = 50 }) => {
+  const listResponse = await gmail.users.messages.list({
+    userId: "me",
+    maxResults,
+    q: "in:inbox",
   });
 
-  const listData = await listResponse.json();
-  if (!listResponse.ok) throw new Error("Unable to list Gmail messages");
-
-  const messages = Array.isArray(listData?.messages) ? listData.messages : [];
+  const messages = Array.isArray(listResponse?.data?.messages) ? listResponse.data.messages : [];
   const details = await Promise.all(
     messages.map(async (message) => {
-      const detailResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+      const detailResponse = await gmail.users.messages.get({
+        userId: "me",
+        id: String(message?.id || ""),
+        format: "metadata",
+        metadataHeaders: ["From", "Subject", "Date"],
       });
 
-      const detailData = await detailResponse.json();
-      if (!detailResponse.ok) return null;
-
+      const detailData = detailResponse?.data || {};
       const headers = Array.isArray(detailData?.payload?.headers) ? detailData.payload.headers : [];
-      const fromHeader = headers.find((header) => header?.name === "From")?.value;
-      const subject = headers.find((header) => header?.name === "Subject")?.value || "(no subject)";
-      const dateHeader = headers.find((header) => header?.name === "Date")?.value;
+      const fromHeader = headers.find((header) => String(header?.name || "").toLowerCase() === "from")?.value;
+      const subject = headers.find((header) => String(header?.name || "").toLowerCase() === "subject")?.value || "(no subject)";
+      const dateHeader = headers.find((header) => String(header?.name || "").toLowerCase() === "date")?.value;
       const parsedFrom = parseAddressHeader(fromHeader);
       const receivedAt = dateHeader ? new Date(dateHeader) : new Date();
 
       return {
-        externalId: String(message.id),
+        externalId: String(message?.id || ""),
         fromName: parsedFrom.fromName || parsedFrom.fromEmail || "Unknown sender",
         fromEmail: parsedFrom.fromEmail,
         subject: String(subject),
@@ -262,29 +321,31 @@ const fetchGmailMessages = async (accessToken, maxResults = 50) => {
     }),
   );
 
-  return details.filter(Boolean);
+  return details.filter((row) => row?.externalId);
 };
 
-const fetchGmailThreadMessages = async ({ accessToken, messageId, connectedEmail }) => {
+const fetchGmailThreadMessages = async ({ gmail, messageId, connectedEmail }) => {
   if (!messageId) return [];
 
-  const detailResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  const detailResponse = await gmail.users.messages.get({
+    userId: "me",
+    id: messageId,
+    format: "metadata",
+    metadataHeaders: ["From", "To", "Subject", "Date"],
   });
-  const detailData = await detailResponse.json();
-  if (!detailResponse.ok) throw new Error("Unable to fetch email thread context");
 
-  const threadId = String(detailData?.threadId || "").trim();
+  const threadId = String(detailResponse?.data?.threadId || "").trim();
   if (!threadId) return [];
 
-  const threadResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  const threadResponse = await gmail.users.threads.get({
+    userId: "me",
+    id: threadId,
+    format: "metadata",
+    metadataHeaders: ["From", "To", "Subject", "Date"],
   });
-  const threadData = await threadResponse.json();
-  if (!threadResponse.ok) throw new Error("Unable to fetch email thread");
 
   const owner = String(connectedEmail || "").trim().toLowerCase();
-  const rows = Array.isArray(threadData?.messages) ? threadData.messages : [];
+  const rows = Array.isArray(threadResponse?.data?.messages) ? threadResponse.data.messages : [];
 
   return rows.map((message) => {
     const headers = Array.isArray(message?.payload?.headers) ? message.payload.headers : [];
@@ -308,6 +369,45 @@ const fetchGmailThreadMessages = async ({ accessToken, messageId, connectedEmail
       direction: owner && fromEmail === owner ? "sent" : "received",
     };
   });
+};
+
+
+const mergeThreadMessages = ({ gmailMessages, localSentMessages, ownerEmail }) => {
+  const owner = String(ownerEmail || "").trim();
+  const sentRows = (Array.isArray(localSentMessages) ? localSentMessages : []).map((row) => ({
+    id: `local-${String(row?.id || "")}`,
+    thread_id: null,
+    from_name: owner || "Automora",
+    from_email: owner || "",
+    to: String(row?.to_email || ""),
+    subject: String(row?.subject || "(no subject)"),
+    snippet: String(row?.snippet || ""),
+    received_at: String(row?.sent_at || row?.created_at || new Date().toISOString()),
+    direction: "sent",
+  }));
+
+  return [...(Array.isArray(gmailMessages) ? gmailMessages : []), ...sentRows]
+    .filter((row) => row && row.id)
+    .sort((a, b) => {
+      const first = new Date(String(a?.received_at || 0)).getTime();
+      const second = new Date(String(b?.received_at || 0)).getTime();
+      return first - second;
+    });
+};
+
+
+const getAuthorizedGmailContext = async ({ userId, integration }) => {
+  const { oauth2Client } = await getAuthorizedGmailClient({ userId, integration });
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const profile = await fetchGmailProfile(oauth2Client);
+
+  const connectedEmail = String(integration.connected_email || "").trim().toLowerCase();
+  const profileEmail = String(profile?.emailAddress || "").trim().toLowerCase();
+  if (connectedEmail && profileEmail && connectedEmail !== profileEmail) {
+    throw new Error("GMAIL_ACCOUNT_MISMATCH");
+  }
+
+  return { oauth2Client, gmail, profile };
 };
 
 export const getEmailIntegrationStatus = async (authHeader) => {
@@ -358,9 +458,14 @@ export const handleGmailCallback = async ({ code, state }) => {
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
   const tokenData = await exchangeCodeForTokens(code);
-  const profile = await fetchGmailProfile(tokenData.access_token);
-  const expiryMs = Number(tokenData.expires_in || 0) * 1000;
-  const tokenExpiry = expiryMs > 0 ? new Date(Date.now() + expiryMs).toISOString() : null;
+  const tokenExpiry = tokenData.expiry_date ? new Date(Number(tokenData.expiry_date)).toISOString() : null;
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token || undefined,
+    expiry_date: tokenData.expiry_date || undefined,
+  });
+  const profile = await fetchGmailProfile(oauth2Client);
 
   await upsertEmailIntegration({
     userId: user.id,
@@ -371,11 +476,11 @@ export const handleGmailCallback = async ({ code, state }) => {
     connectedEmail: profile?.emailAddress || null,
   });
 
-  const emails = await fetchGmailMessages(tokenData.access_token, 50);
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const emails = await fetchGmailMessages({ gmail, maxResults: 50 });
   const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
   await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-  await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-  await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: profile?.emailAddress || "" });
+  await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: profile?.emailAddress || "", provider: "gmail" });
 
   return {
     status: 200,
@@ -396,14 +501,17 @@ export const syncGmailEmails = async (authHeader) => {
   }
 
   try {
-    const emails = await fetchGmailMessages(integration.access_token, 50);
+    const { gmail } = await getAuthorizedGmailContext({ userId: user.id, integration });
+    const emails = await fetchGmailMessages({ gmail, maxResults: 50 });
     const normalizedEmails = emails.map((email) => ({ ...email, externalId: email.externalId || createUserId() }));
     await upsertInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-    await classifyAndPersistInboxEmails({ userId: user.id, provider: "gmail", emails: normalizedEmails });
-    await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: integration.connected_email || "" });
+    await triggerEmailReceivedWorkflowEvents({ user, emails: normalizedEmails, ownerEmail: integration.connected_email || "", provider: "gmail" });
 
     return { status: 200, body: { message: "Emails synced", syncedEmails: normalizedEmails.length } };
-  } catch {
+  } catch (error) {
+    if (String(error?.message || "") === "GMAIL_ACCOUNT_MISMATCH") {
+      return { status: 409, body: { message: "Connected Gmail account changed. Please reconnect Gmail." } };
+    }
     return { status: 502, body: { message: "Unable to sync emails from Gmail. Please reconnect." } };
   }
 };
@@ -412,70 +520,13 @@ export const getInboxEmails = async (authHeader, query = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
-  const category = String(query.category || "").trim().toUpperCase();
   const emails = await listInboxEmailsByUserId({
     userId: user.id,
     search: String(query.search || "").trim(),
-    category: EMAIL_CATEGORIES.includes(category) ? category : "",
   });
 
-  return { status: 200, body: { emails, categories: EMAIL_CATEGORIES } };
+  return { status: 200, body: { emails } };
 };
-
-const encodeBase64Url = (value) =>
-  Buffer.from(String(value || ""), "utf8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-
-const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
-  const safeTo = String(to || "").trim();
-  const safeSubject = String(subject || "").trim() || "(no subject)";
-  const safeBody = String(bodyText || "").trim();
-  const safeInReplyTo = String(inReplyTo || "").trim();
-  const safeReferences = String(references || "").trim();
-
-  const headers = [
-    `To: ${safeTo}`,
-    "Content-Type: text/plain; charset=utf-8",
-    "MIME-Version: 1.0",
-    `Subject: ${safeSubject}`,
-  ];
-
-  if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
-  if (safeReferences) headers.push(`References: ${safeReferences}`);
-
-  return [...headers, "", safeBody].join("\r\n");
-};
-
-const getHeaderValue = (headers, name) => {
-  const target = String(name || "").toLowerCase();
-  const row = (Array.isArray(headers) ? headers : []).find((header) => String(header?.name || "").toLowerCase() === target);
-  return String(row?.value || "").trim();
-};
-
-const fetchGmailReplyContext = async ({ accessToken, messageId }) => {
-  if (!messageId) return null;
-
-  const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  const data = await response.json();
-  if (!response.ok) return null;
-
-  const headers = Array.isArray(data?.payload?.headers) ? data.payload.headers : [];
-  const messageIdHeader = getHeaderValue(headers, "Message-ID");
-  const referencesHeader = getHeaderValue(headers, "References");
-
-  return {
-    threadId: String(data?.threadId || "").trim() || null,
-    messageIdHeader: messageIdHeader || null,
-    referencesHeader: referencesHeader || null,
-  };
-};
-
-
 
 export const getInboxThread = async (authHeader, externalId = "") => {
   const user = await getAuthorizedUser(authHeader);
@@ -487,15 +538,48 @@ export const getInboxThread = async (authHeader, externalId = "") => {
   const integration = await getEmailIntegrationByProvider({ userId: user.id, provider: "gmail" });
   if (!integration?.access_token) return { status: 404, body: { message: "Gmail is not connected" } };
 
+  const localSentMessages = await listInboxSentEmailsByReplyExternalId({
+    userId: user.id,
+    provider: "gmail",
+    replyToExternalId: messageId,
+  });
+
   try {
+    const { gmail } = await getAuthorizedGmailContext({ userId: user.id, integration });
     const threadMessages = await fetchGmailThreadMessages({
-      accessToken: integration.access_token,
+      gmail,
       messageId,
       connectedEmail: integration.connected_email || "",
     });
 
-    return { status: 200, body: { messages: threadMessages } };
-  } catch {
+    return {
+      status: 200,
+      body: {
+        messages: mergeThreadMessages({
+          gmailMessages: threadMessages,
+          localSentMessages,
+          ownerEmail: integration.connected_email || "",
+        }),
+      },
+    };
+  } catch (error) {
+    if (String(error?.message || "") === "GMAIL_ACCOUNT_MISMATCH") {
+      return { status: 409, body: { message: "Connected Gmail account changed. Please reconnect Gmail." } };
+    }
+
+    if (localSentMessages.length > 0) {
+      return {
+        status: 200,
+        body: {
+          messages: mergeThreadMessages({
+            gmailMessages: [],
+            localSentMessages,
+            ownerEmail: integration.connected_email || "",
+          }),
+        },
+      };
+    }
+
     return { status: 502, body: { message: "Unable to load email thread" } };
   }
 };
@@ -535,8 +619,10 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
   }
 
   try {
+    const { gmail, profile } = await getAuthorizedGmailContext({ userId: user.id, integration });
+
     const replyContext = await fetchGmailReplyContext({
-      accessToken: integration.access_token,
+      gmail,
       messageId: replyToExternalId,
     });
 
@@ -544,27 +630,24 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
     const references = [replyContext?.referencesHeader, replyContext?.messageIdHeader].filter(Boolean).join(" ").trim();
     const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references }));
 
-    const sendBody = {
-      raw,
-      ...(replyContext?.threadId ? { threadId: replyContext.threadId } : {}),
-    };
-
-    const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${integration.access_token}`,
-        "Content-Type": "application/json",
+    const response = await gmail.users.messages.send({
+      userId: "me",
+      requestBody: {
+        raw,
+        ...(replyContext?.threadId ? { threadId: replyContext.threadId } : {}),
       },
-      body: JSON.stringify(sendBody),
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      const message = data?.error?.message || "Unable to send email via Gmail";
-      return { status: 502, body: { message } };
-    }
-
     if (replyToExternalId) {
+      await createInboxSentEmail({
+        userId: user.id,
+        provider: "gmail",
+        replyToExternalId,
+        toEmail: to,
+        subject,
+        snippet: bodyText,
+      });
+
       await markInboxEmailReplied({
         userId: user.id,
         provider: "gmail",
@@ -576,11 +659,15 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
       status: 200,
       body: {
         message: "Email sent successfully",
-        gmailMessageId: data?.id || null,
+        gmailMessageId: String(response?.data?.id || "") || null,
+        senderEmail: String(profile?.emailAddress || integration.connected_email || "") || null,
       },
     };
-  } catch {
-    return { status: 502, body: { message: "Unable to send email via Gmail" } };
+  } catch (error) {
+    if (String(error?.message || "") === "GMAIL_ACCOUNT_MISMATCH") {
+      return { status: 409, body: { message: "Connected Gmail account changed. Please reconnect Gmail." } };
+    }
+    return { status: 502, body: { message: "Unable to send email via connected Gmail account" } };
   }
 };
 

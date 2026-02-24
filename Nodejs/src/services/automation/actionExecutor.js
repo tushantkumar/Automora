@@ -1,5 +1,5 @@
+import { google } from "googleapis";
 import { getMailTemplateById } from "../../db/mailTemplateRepository.js";
-import { sendBasicEmail } from "../emailService.js";
 import { createCustomer, getCustomerByEmail, updateCustomerById } from "../../db/customerRepository.js";
 import {
   createInvoice,
@@ -12,6 +12,8 @@ import { createUserId, normalizeEmail } from "../../utils/auth.js";
 import { classifyIncomingEmail, generateAutomationContent } from "./aiService.js";
 import { buildAutomationEmailLayout } from "./emailLayout.js";
 import { createDraftEmail } from "../../db/draftEmailRepository.js";
+import { getEmailIntegrationByProvider, upsertEmailIntegration } from "../../db/emailIntegrationRepository.js";
+import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI } from "../../config/constants.js";
 
 const legacyTokenMap = {
   customerName: "customer.name",
@@ -40,10 +42,10 @@ const toParagraphHtml = (text) => `<p style="margin:0 0 16px;">${String(text || 
 
 const resolveRecipient = (context) => {
   const candidates = [
+    context?.email?.from,
     context?.customer?.email,
     context?.invoice?.customer_email,
     context?.invoice?.customerEmail,
-    context?.email?.from,
   ];
 
   return candidates.find((value) => String(value || "").includes("@")) || "";
@@ -74,19 +76,22 @@ const validateMailTemplate = async ({ automation, userId }) => {
 
 const resolveInvoiceDetails = async ({ automation, userId, context }) => {
   const invoiceRelated = automation.trigger_type === "Invoice" || automation.action_type === "Invoice";
-  if (!invoiceRelated) return null;
-
   const invoiceId = String(context?.invoice?.id || "").trim();
-  if (!invoiceId) {
+
+  if (invoiceId) {
+    const invoice = await getInvoiceWithCustomerByIdForAutomation({ userId, invoiceId });
+    if (invoice) return invoice;
+  }
+
+  if (context?.invoice) {
+    return context.invoice;
+  }
+
+  if (invoiceRelated) {
     throw new Error("Invoice email requires invoice context");
   }
 
-  const invoice = await getInvoiceWithCustomerByIdForAutomation({ userId, invoiceId });
-  if (!invoice) {
-    throw new Error("Invoice not found for email automation");
-  }
-
-  return invoice;
+  return null;
 };
 
 const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverride = null }) => {
@@ -114,7 +119,7 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
   if (!recipient) throw new Error("No recipient email could be resolved for automation");
 
   const html = buildAutomationEmailLayout({
-    companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Auto-X",
+    companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Automora",
     bodyHtml: toParagraphHtml(finalBodyText),
     invoice,
   });
@@ -122,14 +127,146 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
   return { to: recipient, subject, body: finalBodyText, html };
 };
 
+
+
+const createGmailOAuthClient = ({ accessToken, refreshToken, tokenExpiry }) => {
+  const oauth2Client = new google.auth.OAuth2(
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
+  );
+
+  oauth2Client.setCredentials({
+    access_token: accessToken || undefined,
+    refresh_token: refreshToken || undefined,
+    expiry_date: tokenExpiry ? new Date(tokenExpiry).getTime() : undefined,
+  });
+
+  return oauth2Client;
+};
+
+const toIso = (value) => {
+  const d = new Date(Number(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
+
+const getHeaderValue = (headers, name) => {
+  const target = String(name || "").toLowerCase();
+  const row = (Array.isArray(headers) ? headers : []).find((item) => String(item?.name || "").toLowerCase() === target);
+  return String(row?.value || "").trim();
+};
+
+const encodeBase64Url = (value) =>
+  Buffer.from(String(value || ""), "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+
+const buildRawEmail = ({ to, subject, bodyText, htmlBody, inReplyTo, references }) => {
+  const normalizedHtmlBody = String(htmlBody || "").trim();
+  const normalizedTextBody = String(bodyText || "").trim();
+  const headers = [
+    `To: ${String(to || "").trim()}`,
+    `Content-Type: ${normalizedHtmlBody ? "text/html" : "text/plain"}; charset=utf-8`,
+    "MIME-Version: 1.0",
+    `Subject: ${String(subject || "").trim() || "(no subject)"}`,
+  ];
+
+  if (inReplyTo) headers.push(`In-Reply-To: ${String(inReplyTo).trim()}`);
+  if (references) headers.push(`References: ${String(references).trim()}`);
+
+  return [...headers, "", normalizedHtmlBody || normalizedTextBody].join("\r\n");
+};
+
+const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody = "", replyToExternalId = "" }) => {
+  const integration = await getEmailIntegrationByProvider({ userId, provider: "gmail" });
+  if (!integration?.access_token) {
+    throw new Error("Gmail is not connected");
+  }
+
+  const oauth2Client = createGmailOAuthClient({
+    accessToken: integration.access_token,
+    refreshToken: integration.refresh_token,
+    tokenExpiry: integration.token_expiry,
+  });
+
+  const token = await oauth2Client.getAccessToken();
+  if (!token?.token && !oauth2Client.credentials?.access_token) {
+    throw new Error("Unable to obtain Gmail access token");
+  }
+
+  const nextAccessToken = String(oauth2Client.credentials?.access_token || "").trim() || integration.access_token;
+  const nextRefreshToken = String(oauth2Client.credentials?.refresh_token || "").trim() || integration.refresh_token;
+  const nextTokenExpiry = oauth2Client.credentials?.expiry_date ? toIso(oauth2Client.credentials.expiry_date) : integration.token_expiry;
+
+  if (
+    nextAccessToken !== integration.access_token
+    || nextRefreshToken !== integration.refresh_token
+    || String(nextTokenExpiry || "") !== String(integration.token_expiry || "")
+  ) {
+    await upsertEmailIntegration({
+      userId,
+      provider: "gmail",
+      accessToken: nextAccessToken,
+      refreshToken: nextRefreshToken,
+      tokenExpiry: nextTokenExpiry,
+      connectedEmail: integration.connected_email || null,
+    });
+  }
+
+  oauth2Client.setCredentials({
+    access_token: nextAccessToken,
+    refresh_token: nextRefreshToken || undefined,
+    expiry_date: nextTokenExpiry ? new Date(nextTokenExpiry).getTime() : undefined,
+  });
+
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const profile = await gmail.users.getProfile({ userId: "me" });
+  const connectedEmail = String(integration.connected_email || "").trim().toLowerCase();
+  const senderEmail = String(profile?.data?.emailAddress || "").trim().toLowerCase();
+  if (connectedEmail && senderEmail && connectedEmail !== senderEmail) {
+    throw new Error("Connected Gmail account changed. Please reconnect Gmail.");
+  }
+
+  let threadId = "";
+  let inReplyTo = "";
+  let references = "";
+
+  if (replyToExternalId) {
+    const replyMessage = await gmail.users.messages.get({
+      userId: "me",
+      id: String(replyToExternalId).trim(),
+      format: "metadata",
+      metadataHeaders: ["Message-ID", "References"],
+    });
+
+    const headers = Array.isArray(replyMessage?.data?.payload?.headers) ? replyMessage.data.payload.headers : [];
+    inReplyTo = getHeaderValue(headers, "Message-ID");
+    references = [getHeaderValue(headers, "References"), inReplyTo].filter(Boolean).join(" ").trim();
+    threadId = String(replyMessage?.data?.threadId || "").trim();
+  }
+
+  const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, htmlBody, inReplyTo, references }));
+  await gmail.users.messages.send({
+    userId: "me",
+    requestBody: {
+      raw,
+      ...(threadId ? { threadId } : {}),
+    },
+  });
+};
 const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOverride = null }) => {
   const rendered = await renderTemplateEmail({ automation, userId, context, bodyTextOverride });
+  const replyToExternalId = String(context?.email?.externalId || "").trim();
 
-  await sendBasicEmail({
+  await sendViaConnectedGmail({
+    userId,
     to: rendered.to,
     subject: rendered.subject,
-    text: rendered.body,
-    html: rendered.html,
+    bodyText: rendered.body,
+    htmlBody: rendered.html,
+    replyToExternalId,
   });
 
   return { to: rendered.to, subject: rendered.subject, body: rendered.body, mode: "sent" };
@@ -144,11 +281,11 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
   };
 
   const classification = await classifyIncomingEmail({ body: incoming.body });
-
   const relevantData = { classification };
 
-  if (classification === "Invoice") {
-    const invoiceNumber = extractInvoiceNumber(`${incoming.subject}\n${incoming.body}`);
+  if (classification.category === "Invoice" || classification.invoiceFlag === 'invoicePresent' || classification.invoiceFlag === 'InvoicePresent') {
+    // const invoiceNumber = extractInvoiceNumber(`${incoming.subject}\n${incoming.body}`);
+    const invoiceNumber = classification.invoiceNumber;
     if (invoiceNumber) {
       const invoice = await getInvoiceByNumberForUser({ userId, invoiceNumber });
       if (invoice) {
@@ -161,15 +298,20 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
             contact: invoiceDetails.customer_contact,
           };
         }
+      } else {
+        relevantData?.classification?.category = 'Invoice'
+        relevantData?.classification?.invoiceNumber = null;
+        relevantData?.classification?.invoiceFlag = 'noInvoice';
       }
     }
-  } else {
-    const customer = await getCustomerByEmail({ userId, email: incoming.from });
-    if (customer) {
-      relevantData.customer = customer;
-      const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
-      if (invoice) relevantData.invoice = invoice;
-    }
+  }
+  else {
+  const customer = await getCustomerByEmail({ userId, email: incoming.from });
+  if (customer) {
+    relevantData.customer = customer;
+    // const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
+    // if (invoice) relevantData.invoice = invoice;
+  }
   }
 
   const aiResponse = await generateAutomationContent({
