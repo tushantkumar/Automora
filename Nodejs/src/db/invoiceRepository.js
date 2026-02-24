@@ -260,3 +260,17 @@ export const countInvoicesByCustomerId = async ({ userId, customerId }) => {
 
   return Number(result.rows[0]?.total || 0);
 };
+
+
+export const listInvoicesByCustomerId = async ({ userId, customerId }) => {
+  const result = await pool.query(
+    `SELECT ${invoiceSelect()}
+     FROM auth_invoices
+     WHERE user_id = $1
+       AND customer_id = $2
+     ORDER BY issue_date DESC, created_at DESC`,
+    [userId, customerId],
+  );
+
+  return result.rows;
+};
