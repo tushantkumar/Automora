@@ -1,6 +1,5 @@
 import { google } from "googleapis";
 import { getMailTemplateById } from "../../db/mailTemplateRepository.js";
-import { sendBasicEmail } from "../emailService.js";
 import { createCustomer, getCustomerByEmail, updateCustomerById } from "../../db/customerRepository.js";
 import {
   createInvoice,
@@ -257,25 +256,15 @@ const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, replyToExt
 };
 const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOverride = null }) => {
   const rendered = await renderTemplateEmail({ automation, userId, context, bodyTextOverride });
-
   const replyToExternalId = String(context?.email?.externalId || "").trim();
 
-  if (replyToExternalId) {
-    await sendViaConnectedGmail({
-      userId,
-      to: rendered.to,
-      subject: rendered.subject,
-      bodyText: rendered.body,
-      replyToExternalId,
-    });
-  } else {
-    await sendBasicEmail({
-      to: rendered.to,
-      subject: rendered.subject,
-      text: rendered.body,
-      html: rendered.html,
-    });
-  }
+  await sendViaConnectedGmail({
+    userId,
+    to: rendered.to,
+    subject: rendered.subject,
+    bodyText: rendered.body,
+    replyToExternalId,
+  });
 
   return { to: rendered.to, subject: rendered.subject, body: rendered.body, mode: "sent" };
 };
