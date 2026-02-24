@@ -119,7 +119,7 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
   if (!recipient) throw new Error("No recipient email could be resolved for automation");
 
   const html = buildAutomationEmailLayout({
-    companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Auto-X",
+    companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Automora",
     bodyHtml: toParagraphHtml(finalBodyText),
     invoice,
   });
@@ -281,11 +281,11 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
   };
 
   const classification = await classifyIncomingEmail({ body: incoming.body });
-
   const relevantData = { classification };
 
-  if (classification === "Invoice") {
-    const invoiceNumber = extractInvoiceNumber(`${incoming.subject}\n${incoming.body}`);
+  if (classification.category === "Invoice" || classification.invoiceFlag === 'invoicePresent' || classification.invoiceFlag === 'InvoicePresent') {
+    // const invoiceNumber = extractInvoiceNumber(`${incoming.subject}\n${incoming.body}`);
+    const invoiceNumber = classification.invoiceNumber;
     if (invoiceNumber) {
       const invoice = await getInvoiceByNumberForUser({ userId, invoiceNumber });
       if (invoice) {
@@ -298,14 +298,21 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
             contact: invoiceDetails.customer_contact,
           };
         }
+      } else {
+        relevantData.classification = {
+          category: 'Invoice',
+          invoiceNumber: null,
+          invoiceFlag: 'noInvoice'
+        };
       }
     }
-  } else {
+  }
+  else {
     const customer = await getCustomerByEmail({ userId, email: incoming.from });
     if (customer) {
       relevantData.customer = customer;
-      const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
-      if (invoice) relevantData.invoice = invoice;
+      // const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
+      // if (invoice) relevantData.invoice = invoice;
     }
   }
 

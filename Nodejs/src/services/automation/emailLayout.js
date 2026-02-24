@@ -124,7 +124,7 @@ export const buildAutomationEmailLayout = ({ companyName, bodyHtml, invoice }) =
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden;">
               <tr>
                 <td style="padding:20px 24px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#ffffff;">
-                  <h1 style="margin:0;font-size:20px;">${escapeHtml(companyName || "Auto-X")}</h1>
+                  <h1 style="margin:0;font-size:20px;">${escapeHtml(companyName || "Automora")}</h1>
                   <p style="margin:8px 0 0;font-size:13px;opacity:0.9;">Automation Notification</p>
                 </td>
               </tr>
@@ -136,7 +136,7 @@ export const buildAutomationEmailLayout = ({ companyName, bodyHtml, invoice }) =
               </tr>
               <tr>
                 <td style="padding:16px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;color:#475569;font-size:12px;">
-                  Need help? Contact support at <a href="mailto:support@auto-x.local" style="color:#4f46e5;text-decoration:none;">support@auto-x.local</a>
+                  Need help? Contact support at <a href="mailto:support@automora.local" style="color:#4f46e5;text-decoration:none;">support@automora.local</a>
                 </td>
               </tr>
             </table>

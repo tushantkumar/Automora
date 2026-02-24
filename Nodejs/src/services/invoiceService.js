@@ -100,7 +100,7 @@ const generateInvoicePdfBuffer = async ({ invoice }) => {
 
   doc.rect(0, 0, doc.page.width, 120).fill("#f1f5f9");
   doc.rect(0, 0, doc.page.width, 80).fill("#4f46e5");
-  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text("Auto-X Invoice", 50, 28);
+  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text("Automora Invoice", 50, 28);
   doc.fontSize(11).font("Helvetica").text(`Invoice #${safeInvoiceNumber}`, 50, 56);
 
   doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(14).text("Invoice Details", 50, 140);
