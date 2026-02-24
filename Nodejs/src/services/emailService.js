@@ -3,6 +3,8 @@ import { APP_BASE_URL, SMTP_FROM, SMTP_HOST, SMTP_PASS, SMTP_PORT, SMTP_USER } f
 
 const hasSmtpCredentials = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
 
+export const isSmtpConfigured = () => hasSmtpCredentials;
+
 const transporter = hasSmtpCredentials
   ? nodemailer.createTransport({
       host: SMTP_HOST,

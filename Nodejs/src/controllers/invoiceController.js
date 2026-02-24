@@ -4,6 +4,7 @@ import {
   getInvoiceInsightsForUser,
   getInvoicesForUser,
   updateInvoiceForUser,
+  getInvoicePdfForUser,
 } from "../services/invoiceService.js";
 
 export const getInvoicesHandler = async (req, res) => {
@@ -29,4 +30,16 @@ export const updateInvoiceHandler = async (req, res) => {
 export const deleteInvoiceHandler = async (req, res) => {
   const result = await deleteInvoiceForUser(req.headers.authorization, req.params.invoiceId);
   return res.status(result.status).json(result.body);
+};
+
+
+export const downloadInvoicePdfHandler = async (req, res) => {
+  const result = await getInvoicePdfForUser(req.headers.authorization, req.params.invoiceId);
+  if (result.status !== 200) {
+    return res.status(result.status).json(result.body);
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${result.body.fileName}"`);
+  return res.status(200).send(result.body.buffer);
 };

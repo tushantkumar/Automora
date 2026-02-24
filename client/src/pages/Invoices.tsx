@@ -351,6 +351,39 @@ export default function Invoices() {
     void loadInsights();
   };
 
+
+  const downloadInvoicePdf = async (invoiceId: string) => {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/invoices/${invoiceId}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        toast({ title: "Unable to download invoice", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || `invoice-${invoiceId}.pdf`;
+
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch {
+      toast({ title: "Unable to download invoice", description: "Please try again." });
+    }
+  };
+
   const amountFormatter = (value: number | string) => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return "$0.00";
@@ -521,6 +554,7 @@ export default function Invoices() {
                   <TableCell><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusClassName(normalizedStatus)}`}>{normalizedStatus}</span></TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { void downloadInvoicePdf(invoice.id); }}><Download className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-primary"><Send className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(invoice)}><Pencil className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeInvoice(invoice.id)}><Trash2 className="w-4 h-4" /></Button>
