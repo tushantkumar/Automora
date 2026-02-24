@@ -258,13 +258,15 @@ const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, replyToExt
 const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOverride = null }) => {
   const rendered = await renderTemplateEmail({ automation, userId, context, bodyTextOverride });
 
-  if (automation.trigger_type === "Email Received") {
+  const replyToExternalId = String(context?.email?.externalId || "").trim();
+
+  if (replyToExternalId) {
     await sendViaConnectedGmail({
       userId,
       to: rendered.to,
       subject: rendered.subject,
       bodyText: rendered.body,
-      replyToExternalId: String(context?.email?.externalId || "").trim(),
+      replyToExternalId,
     });
   } else {
     await sendBasicEmail({

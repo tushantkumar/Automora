@@ -193,6 +193,13 @@ const triggerEmailReceivedWorkflowEvents = async ({ user, emails, ownerEmail = "
     if (!externalId || processedIncomingEmailIds.has(`${user.id}:${externalId}`)) continue;
     if (normalizedOwnerEmail && senderEmail && senderEmail === normalizedOwnerEmail) continue;
 
+    const existingInboxEmail = await getInboxEmailByExternalId({
+      userId: user.id,
+      provider,
+      externalId,
+    });
+    if (existingInboxEmail?.replied_at) continue;
+
     processedIncomingEmailIds.add(`${user.id}:${externalId}`);
     if (processedIncomingEmailIds.size > 5000) {
       const first = processedIncomingEmailIds.values().next().value;
