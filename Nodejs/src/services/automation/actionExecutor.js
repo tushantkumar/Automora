@@ -299,19 +299,21 @@ const executeAiForEmailReceived = async ({ automation, userId, context, asDraft 
           };
         }
       } else {
-        relevantData?.classification?.category = 'Invoice'
-        relevantData?.classification?.invoiceNumber = null;
-        relevantData?.classification?.invoiceFlag = 'noInvoice';
+        relevantData.classification = {
+          category: 'Invoice',
+          invoiceNumber: null,
+          invoiceFlag: 'noInvoice'
+        };
       }
     }
   }
   else {
-  const customer = await getCustomerByEmail({ userId, email: incoming.from });
-  if (customer) {
-    relevantData.customer = customer;
-    // const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
-    // if (invoice) relevantData.invoice = invoice;
-  }
+    const customer = await getCustomerByEmail({ userId, email: incoming.from });
+    if (customer) {
+      relevantData.customer = customer;
+      // const invoice = await getLatestInvoiceForCustomerEmail({ userId, customerEmail: incoming.from });
+      // if (invoice) relevantData.invoice = invoice;
+    }
   }
 
   const aiResponse = await generateAutomationContent({
