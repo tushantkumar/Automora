@@ -352,6 +352,38 @@ export default function Invoices() {
   };
 
 
+  const downloadInvoicesExcel = async () => {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/invoices/download/excel${queryString ? `?${queryString}` : ""}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        toast({ title: "Unable to download invoices", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || "invoices-report.xls";
+
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch {
+      toast({ title: "Unable to download invoices", description: "Please try again." });
+    }
+  };
+
   const downloadInvoicePdf = async (invoiceId: string) => {
     if (!token) return;
 
@@ -516,7 +548,7 @@ export default function Invoices() {
             <span className="text-sm text-muted-foreground">to</span>
             <div className="relative"><CalendarDays className="w-4 h-4 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2" /><Input type="date" className="pl-8" value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
             <Button variant="outline" size="sm" onClick={() => { setInvoiceNumberFilter(""); setFromDate(""); setToDate(""); }}>Reset</Button>
-            <Button variant="outline" size="sm"><Download className="w-4 h-4 mr-2" /> Export Report</Button>
+            <Button variant="outline" size="sm" onClick={() => { void downloadInvoicesExcel(); }}><Download className="w-4 h-4 mr-2" /> Export Report</Button>
           </div>
         </div>
 
