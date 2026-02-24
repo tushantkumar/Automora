@@ -61,6 +61,98 @@ const collectPdfBuffer = (doc) => new Promise((resolve, reject) => {
   doc.on("error", reject);
 });
 
+
+const escapeSpreadsheetXml = (value) => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&apos;");
+
+const buildCustomerInvoiceExcelBuffer = async ({ customersWithInvoices }) => {
+  const rows = [];
+  rows.push('<?xml version="1.0"?>');
+  rows.push('<?mso-application progid="Excel.Sheet"?>');
+  rows.push('<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">');
+  rows.push('<Worksheet ss:Name="Customer Reports">');
+  rows.push('<Table>');
+
+  const headerCells = [
+    "Customer Name",
+    "Client",
+    "Email",
+    "Contact",
+    "Customer Status",
+    "Revenue",
+    "Invoice Number",
+    "Issue Date",
+    "Due Date",
+    "Invoice Status",
+    "Tax",
+    "Amount",
+    "Line Item Description",
+    "Quantity",
+    "Rate",
+    "Line Total",
+  ].map((header) => `<Cell><Data ss:Type="String">${escapeSpreadsheetXml(header)}</Data></Cell>`).join("");
+  rows.push(`<Row>${headerCells}</Row>`);
+
+  for (const item of Array.isArray(customersWithInvoices) ? customersWithInvoices : []) {
+    const customer = item?.customer || {};
+    const invoices = Array.isArray(item?.invoices) ? item.invoices : [];
+
+    let grandTotal = 0;
+    let grandTax = 0;
+
+    for (const invoice of invoices) {
+      const amount = Number(invoice?.amount || 0);
+      const taxRate = Number(invoice?.tax_rate || 0);
+      const taxAmount = Number.isFinite(amount) && Number.isFinite(taxRate) ? (amount * taxRate) / 100 : 0;
+      grandTotal += Number.isFinite(amount) ? amount : 0;
+      grandTax += Number.isFinite(taxAmount) ? taxAmount : 0;
+
+      const lineItems = parseLineItems(invoice?.line_items);
+      const normalizedItems = lineItems.length > 0 ? lineItems : [null];
+
+      for (const lineItem of normalizedItems) {
+        const quantity = Number(lineItem?.quantity || 0);
+        const rate = Number(lineItem?.rate || 0);
+        const lineTotal = quantity * rate;
+
+        const cells = [
+          { type: "String", value: String(customer?.name || "") },
+          { type: "String", value: String(customer?.client || "") },
+          { type: "String", value: String(customer?.email || "") },
+          { type: "String", value: String(customer?.contact || "") },
+          { type: "String", value: String(customer?.status || "") },
+          { type: "String", value: String(customer?.value || "") },
+          { type: "String", value: String(invoice?.invoice_number || "") },
+          { type: "String", value: String(invoice?.issue_date || "").slice(0, 10) },
+          { type: "String", value: String(invoice?.due_date || "").slice(0, 10) },
+          { type: "String", value: String(invoice?.status || "") },
+          { type: "Number", value: Number.isFinite(taxAmount) ? taxAmount : 0 },
+          { type: "Number", value: Number.isFinite(amount) ? amount : 0 },
+          { type: "String", value: String(lineItem?.description || "") },
+          { type: "Number", value: Number.isFinite(quantity) ? quantity : 0 },
+          { type: "Number", value: Number.isFinite(rate) ? rate : 0 },
+          { type: "Number", value: Number.isFinite(lineTotal) ? lineTotal : 0 },
+        ];
+        rows.push(`<Row>${cells.map((cell) => `<Cell><Data ss:Type="${cell.type}">${escapeSpreadsheetXml(cell.value)}</Data></Cell>`).join("")}</Row>`);
+      }
+    }
+
+    rows.push('<Row></Row>');
+    rows.push(`<Row><Cell><Data ss:Type="String">${escapeSpreadsheetXml(String(customer?.name || "Customer"))} Summary</Data></Cell><Cell/><Cell/><Cell/><Cell/><Cell/><Cell><Data ss:Type="String">Total Invoices</Data></Cell><Cell><Data ss:Type="Number">${invoices.length}</Data></Cell><Cell/><Cell><Data ss:Type="String">Total Tax</Data></Cell><Cell><Data ss:Type="Number">${grandTax}</Data></Cell><Cell><Data ss:Type="String">Grand Total</Data></Cell><Cell><Data ss:Type="Number">${grandTotal}</Data></Cell><Cell/><Cell/></Row>`);
+    rows.push('<Row></Row>');
+  }
+
+  rows.push('</Table>');
+  rows.push('</Worksheet>');
+  rows.push('</Workbook>');
+
+  return Buffer.from(rows.join(""), "utf8");
+};
+
 const generateCustomerInvoicePdfBuffer = async ({ customer, invoices }) => {
   const doc = new PDFDocument({ size: "A4", margin: 50 });
   const bufferPromise = collectPdfBuffer(doc);
@@ -240,6 +332,41 @@ export const deleteCustomerForUser = async (authHeader, customerId) => {
   return { status: 200, body: { message: "customer deleted" } };
 };
 
+
+
+export const exportCustomerInvoicesExcelForUser = async (authHeader, query = {}) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const normalizedQuery = String(query.search || "").trim().toLowerCase();
+  const customers = await listCustomersByUserId(user.id);
+  const filteredCustomers = normalizedQuery
+    ? customers.filter((customer) => [customer?.name, customer?.client, customer?.contact, customer?.email, customer?.status]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery))
+    : customers;
+
+  const customersWithInvoices = await Promise.all(
+    filteredCustomers.map(async (customer) => ({
+      customer,
+      invoices: await listInvoicesByCustomerId({ userId: user.id, customerId: customer.id }),
+    })),
+  );
+
+  try {
+    const buffer = await buildCustomerInvoiceExcelBuffer({ customersWithInvoices });
+    return {
+      status: 200,
+      body: {
+        buffer,
+        fileName: `customers-report-${new Date().toISOString().slice(0, 10)}.xls`,
+      },
+    };
+  } catch {
+    return { status: 502, body: { message: "Unable to generate customer invoices Excel" } };
+  }
+};
 
 export const getCustomerInvoicePdfForUser = async (authHeader, customerId) => {
   const user = await getAuthorizedUser(authHeader);

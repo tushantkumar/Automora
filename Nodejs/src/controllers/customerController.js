@@ -4,6 +4,7 @@ import {
   getCustomersForUser,
   updateCustomerForUser,
   getCustomerInvoicePdfForUser,
+  exportCustomerInvoicesExcelForUser,
 } from "../services/customerService.js";
 
 export const getCustomersHandler = async (req, res) => {
@@ -26,6 +27,18 @@ export const deleteCustomerHandler = async (req, res) => {
   return res.status(result.status).json(result.body);
 };
 
+
+
+export const downloadCustomerInvoicesExcelHandler = async (req, res) => {
+  const result = await exportCustomerInvoicesExcelForUser(req.headers.authorization, req.query || {});
+  if (result.status !== 200) {
+    return res.status(result.status).json(result.body);
+  }
+
+  res.setHeader("Content-Type", "application/vnd.ms-excel");
+  res.setHeader("Content-Disposition", `attachment; filename="${result.body.fileName}"`);
+  return res.status(200).send(result.body.buffer);
+};
 
 export const downloadCustomerInvoicePdfHandler = async (req, res) => {
   const result = await getCustomerInvoicePdfForUser(req.headers.authorization, req.params.customerId);
