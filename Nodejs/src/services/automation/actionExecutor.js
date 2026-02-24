@@ -163,10 +163,12 @@ const encodeBase64Url = (value) =>
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 
-const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
+const buildRawEmail = ({ to, subject, bodyText, htmlBody, inReplyTo, references }) => {
+  const normalizedHtmlBody = String(htmlBody || "").trim();
+  const normalizedTextBody = String(bodyText || "").trim();
   const headers = [
     `To: ${String(to || "").trim()}`,
-    "Content-Type: text/plain; charset=utf-8",
+    `Content-Type: ${normalizedHtmlBody ? "text/html" : "text/plain"}; charset=utf-8`,
     "MIME-Version: 1.0",
     `Subject: ${String(subject || "").trim() || "(no subject)"}`,
   ];
@@ -174,10 +176,10 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
   if (inReplyTo) headers.push(`In-Reply-To: ${String(inReplyTo).trim()}`);
   if (references) headers.push(`References: ${String(references).trim()}`);
 
-  return [...headers, "", String(bodyText || "").trim()].join("\r\n");
+  return [...headers, "", normalizedHtmlBody || normalizedTextBody].join("\r\n");
 };
 
-const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, replyToExternalId = "" }) => {
+const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody = "", replyToExternalId = "" }) => {
   const integration = await getEmailIntegrationByProvider({ userId, provider: "gmail" });
   if (!integration?.access_token) {
     throw new Error("Gmail is not connected");
@@ -245,7 +247,7 @@ const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, replyToExt
     threadId = String(replyMessage?.data?.threadId || "").trim();
   }
 
-  const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references }));
+  const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, htmlBody, inReplyTo, references }));
   await gmail.users.messages.send({
     userId: "me",
     requestBody: {
@@ -263,6 +265,7 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
     to: rendered.to,
     subject: rendered.subject,
     bodyText: rendered.body,
+    htmlBody: rendered.html,
     replyToExternalId,
   });
 
