@@ -101,6 +101,30 @@ const buildCustomerInvoiceExcelBuffer = async ({ customersWithInvoices }) => {
     const customer = item?.customer || {};
     const invoices = Array.isArray(item?.invoices) ? item.invoices : [];
 
+    if (invoices.length === 0) {
+      const customerOnlyCells = [
+        { type: "String", value: String(customer?.name || "") },
+        { type: "String", value: String(customer?.client || "") },
+        { type: "String", value: String(customer?.email || "") },
+        { type: "String", value: String(customer?.contact || "") },
+        { type: "String", value: String(customer?.status || "") },
+        { type: "String", value: String(customer?.value || "") },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+        { type: "String", value: "" },
+      ];
+      rows.push(`<Row>${customerOnlyCells.map((cell) => `<Cell><Data ss:Type="${cell.type}">${escapeSpreadsheetXml(cell.value)}</Data></Cell>`).join("")}</Row>`);
+      rows.push('<Row></Row>');
+      continue;
+    }
+
     let grandTotal = 0;
     let grandTax = 0;
 
