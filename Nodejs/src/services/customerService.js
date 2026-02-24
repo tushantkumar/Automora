@@ -86,11 +86,13 @@ const generateCustomerInvoicePdfBuffer = async ({ customer, invoices }) => {
   doc.text("Invoice", 62, y + 9, { width: 95 });
   doc.text("Issue", 160, y + 9, { width: 90 });
   doc.text("Due", 252, y + 9, { width: 90 });
-  doc.text("Status", 345, y + 9, { width: 85 });
-  doc.text("Amount", 438, y + 9, { width: 95, align: "right" });
+  doc.text("Status", 345, y + 9, { width: 70 });
+  doc.text("Tax", 417, y + 9, { width: 55, align: "right" });
+  doc.text("Amount", 474, y + 9, { width: 60, align: "right" });
   y += 32;
 
   let grandTotal = 0;
+  let grandTax = 0;
 
   for (const invoice of Array.isArray(invoices) ? invoices : []) {
     if (y > 760) {
@@ -99,15 +101,19 @@ const generateCustomerInvoicePdfBuffer = async ({ customer, invoices }) => {
     }
 
     const amount = Number(invoice?.amount || 0);
+    const taxRate = Number(invoice?.tax_rate || 0);
+    const taxAmount = Number.isFinite(amount) && Number.isFinite(taxRate) ? (amount * taxRate) / 100 : 0;
     grandTotal += Number.isFinite(amount) ? amount : 0;
+    grandTax += Number.isFinite(taxAmount) ? taxAmount : 0;
 
     doc.roundedRect(50, y, 495, 24, 5).fillAndStroke("#ffffff", "#e2e8f0");
     doc.fillColor("#0f172a").font("Helvetica").fontSize(10);
     doc.text(String(invoice?.invoice_number || "-"), 62, y + 7, { width: 95 });
     doc.text(toFriendlyDate(invoice?.issue_date), 160, y + 7, { width: 90 });
     doc.text(toFriendlyDate(invoice?.due_date), 252, y + 7, { width: 90 });
-    doc.text(String(invoice?.status || "-"), 345, y + 7, { width: 85 });
-    doc.text(toCurrency(amount), 438, y + 7, { width: 95, align: "right" });
+    doc.text(String(invoice?.status || "-"), 345, y + 7, { width: 70 });
+    doc.text(toCurrency(taxAmount), 417, y + 7, { width: 55, align: "right" });
+    doc.text(toCurrency(amount), 474, y + 7, { width: 60, align: "right" });
     y += 28;
 
     const items = parseLineItems(invoice?.line_items);
@@ -133,6 +139,7 @@ const generateCustomerInvoicePdfBuffer = async ({ customer, invoices }) => {
   y += 6;
   doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(12)
     .text(`Total Invoices: ${Array.isArray(invoices) ? invoices.length : 0}`, 50, y)
+    .text(`Total Tax: ${toCurrency(grandTax)}`, 50, y + 18)
     .text(`Grand Total: ${toCurrency(grandTotal)}`, 50, y, { align: "right" });
 
   doc.end();
