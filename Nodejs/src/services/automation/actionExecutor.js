@@ -1,3 +1,4 @@
+import { google } from "googleapis";
 import { getMailTemplateById } from "../../db/mailTemplateRepository.js";
 import { sendBasicEmail } from "../emailService.js";
 import { createCustomer, getCustomerByEmail, updateCustomerById } from "../../db/customerRepository.js";
@@ -12,6 +13,8 @@ import { createUserId, normalizeEmail } from "../../utils/auth.js";
 import { classifyIncomingEmail, generateAutomationContent } from "./aiService.js";
 import { buildAutomationEmailLayout } from "./emailLayout.js";
 import { createDraftEmail } from "../../db/draftEmailRepository.js";
+import { getEmailIntegrationByProvider, upsertEmailIntegration } from "../../db/emailIntegrationRepository.js";
+import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI } from "../../config/constants.js";
 
 const legacyTokenMap = {
   customerName: "customer.name",
@@ -125,15 +128,152 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
   return { to: recipient, subject, body: finalBodyText, html };
 };
 
+
+
+const createGmailOAuthClient = ({ accessToken, refreshToken, tokenExpiry }) => {
+  const oauth2Client = new google.auth.OAuth2(
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
+  );
+
+  oauth2Client.setCredentials({
+    access_token: accessToken || undefined,
+    refresh_token: refreshToken || undefined,
+    expiry_date: tokenExpiry ? new Date(tokenExpiry).getTime() : undefined,
+  });
+
+  return oauth2Client;
+};
+
+const toIso = (value) => {
+  const d = new Date(Number(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
+
+const getHeaderValue = (headers, name) => {
+  const target = String(name || "").toLowerCase();
+  const row = (Array.isArray(headers) ? headers : []).find((item) => String(item?.name || "").toLowerCase() === target);
+  return String(row?.value || "").trim();
+};
+
+const encodeBase64Url = (value) =>
+  Buffer.from(String(value || ""), "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+
+const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
+  const headers = [
+    `To: ${String(to || "").trim()}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "MIME-Version: 1.0",
+    `Subject: ${String(subject || "").trim() || "(no subject)"}`,
+  ];
+
+  if (inReplyTo) headers.push(`In-Reply-To: ${String(inReplyTo).trim()}`);
+  if (references) headers.push(`References: ${String(references).trim()}`);
+
+  return [...headers, "", String(bodyText || "").trim()].join("\r\n");
+};
+
+const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, replyToExternalId = "" }) => {
+  const integration = await getEmailIntegrationByProvider({ userId, provider: "gmail" });
+  if (!integration?.access_token) {
+    throw new Error("Gmail is not connected");
+  }
+
+  const oauth2Client = createGmailOAuthClient({
+    accessToken: integration.access_token,
+    refreshToken: integration.refresh_token,
+    tokenExpiry: integration.token_expiry,
+  });
+
+  const token = await oauth2Client.getAccessToken();
+  if (!token?.token && !oauth2Client.credentials?.access_token) {
+    throw new Error("Unable to obtain Gmail access token");
+  }
+
+  const nextAccessToken = String(oauth2Client.credentials?.access_token || "").trim() || integration.access_token;
+  const nextRefreshToken = String(oauth2Client.credentials?.refresh_token || "").trim() || integration.refresh_token;
+  const nextTokenExpiry = oauth2Client.credentials?.expiry_date ? toIso(oauth2Client.credentials.expiry_date) : integration.token_expiry;
+
+  if (
+    nextAccessToken !== integration.access_token
+    || nextRefreshToken !== integration.refresh_token
+    || String(nextTokenExpiry || "") !== String(integration.token_expiry || "")
+  ) {
+    await upsertEmailIntegration({
+      userId,
+      provider: "gmail",
+      accessToken: nextAccessToken,
+      refreshToken: nextRefreshToken,
+      tokenExpiry: nextTokenExpiry,
+      connectedEmail: integration.connected_email || null,
+    });
+  }
+
+  oauth2Client.setCredentials({
+    access_token: nextAccessToken,
+    refresh_token: nextRefreshToken || undefined,
+    expiry_date: nextTokenExpiry ? new Date(nextTokenExpiry).getTime() : undefined,
+  });
+
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const profile = await gmail.users.getProfile({ userId: "me" });
+  const connectedEmail = String(integration.connected_email || "").trim().toLowerCase();
+  const senderEmail = String(profile?.data?.emailAddress || "").trim().toLowerCase();
+  if (connectedEmail && senderEmail && connectedEmail !== senderEmail) {
+    throw new Error("Connected Gmail account changed. Please reconnect Gmail.");
+  }
+
+  let threadId = "";
+  let inReplyTo = "";
+  let references = "";
+
+  if (replyToExternalId) {
+    const replyMessage = await gmail.users.messages.get({
+      userId: "me",
+      id: String(replyToExternalId).trim(),
+      format: "metadata",
+      metadataHeaders: ["Message-ID", "References"],
+    });
+
+    const headers = Array.isArray(replyMessage?.data?.payload?.headers) ? replyMessage.data.payload.headers : [];
+    inReplyTo = getHeaderValue(headers, "Message-ID");
+    references = [getHeaderValue(headers, "References"), inReplyTo].filter(Boolean).join(" ").trim();
+    threadId = String(replyMessage?.data?.threadId || "").trim();
+  }
+
+  const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references }));
+  await gmail.users.messages.send({
+    userId: "me",
+    requestBody: {
+      raw,
+      ...(threadId ? { threadId } : {}),
+    },
+  });
+};
 const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOverride = null }) => {
   const rendered = await renderTemplateEmail({ automation, userId, context, bodyTextOverride });
 
-  await sendBasicEmail({
-    to: rendered.to,
-    subject: rendered.subject,
-    text: rendered.body,
-    html: rendered.html,
-  });
+  if (automation.trigger_type === "Email Received") {
+    await sendViaConnectedGmail({
+      userId,
+      to: rendered.to,
+      subject: rendered.subject,
+      bodyText: rendered.body,
+      replyToExternalId: String(context?.email?.externalId || "").trim(),
+    });
+  } else {
+    await sendBasicEmail({
+      to: rendered.to,
+      subject: rendered.subject,
+      text: rendered.body,
+      html: rendered.html,
+    });
+  }
 
   return { to: rendered.to, subject: rendered.subject, body: rendered.body, mode: "sent" };
 };
