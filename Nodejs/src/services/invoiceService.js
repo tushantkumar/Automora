@@ -65,11 +65,9 @@ const normalizeExcelDate = (value) => {
   return parsed.toISOString().slice(0, 10);
 };
 
-const parseImportedLineItems = (value, fallbackAmount = 0) => {
+const parseImportedLineItems = (value) => {
   const raw = String(value || "").trim();
-  if (!raw) {
-    return [{ description: "Imported line item", quantity: 1, rate: Number(fallbackAmount || 0) }];
-  }
+  if (!raw) return [];
 
   return raw
     .split(";")
@@ -101,13 +99,11 @@ const parseInvoiceRowsFromExcelBuffer = async (buffer) => {
     const statusRaw = String(row.getCell(5).value ?? "").trim();
     const status = statusRaw || "Unpaid";
     const taxRateRaw = String(row.getCell(6).value ?? "").trim();
-    const amountRaw = String(row.getCell(7).value ?? "").trim();
     const taxRate = taxRateRaw ? Number(taxRateRaw) : 0;
-    const amount = amountRaw ? Number(amountRaw) : 0;
-    const notes = String(row.getCell(8).value || "").trim();
-    const rawLineItems = String(row.getCell(9).value || "").trim();
+    const notes = String(row.getCell(7).value || "").trim();
+    const rawLineItems = String(row.getCell(8).value || "").trim();
 
-    if (!invoiceNumber && !customerEmail && !issueDate && !dueDate && !statusRaw && !taxRateRaw && !amountRaw && !notes && !rawLineItems) return;
+    if (!invoiceNumber && !customerEmail && !issueDate && !dueDate && !statusRaw && !taxRateRaw && !notes && !rawLineItems) return;
 
     rows.push({
       rowNumber,
@@ -117,9 +113,8 @@ const parseInvoiceRowsFromExcelBuffer = async (buffer) => {
       dueDate,
       status,
       taxRate,
-      amount,
       notes,
-      lineItems: parseImportedLineItems(rawLineItems, amount),
+      lineItems: parseImportedLineItems(rawLineItems),
     });
   });
 
@@ -475,7 +470,7 @@ export const importInvoicesExcelForUser = async (authHeader, payload = {}) => {
   const touchedCustomerIds = new Set();
 
   for (const row of invoiceRows) {
-    if (!row.invoiceNumber || !row.customerEmail || !row.issueDate || !row.dueDate || row.lineItems.length === 0 || !Number.isFinite(row.amount) || row.amount < 0 || !Number.isFinite(row.taxRate) || row.taxRate < 0) {
+    if (!row.invoiceNumber || !row.customerEmail || !row.issueDate || !row.dueDate || row.lineItems.length === 0 || !Number.isFinite(row.taxRate) || row.taxRate < 0) {
       errors.push(`Row ${row.rowNumber}: required fields are missing or invalid`);
       continue;
     }
@@ -487,6 +482,9 @@ export const importInvoicesExcelForUser = async (authHeader, payload = {}) => {
     }
 
     try {
+      const subtotal = row.lineItems.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.rate || 0)), 0);
+      const computedAmount = Number((subtotal + (subtotal * row.taxRate) / 100).toFixed(2));
+
       const invoice = await createInvoice({
         id: createUserId(),
         userId: user.id,
@@ -495,7 +493,7 @@ export const importInvoicesExcelForUser = async (authHeader, payload = {}) => {
         clientName: customer.client,
         issueDate: row.issueDate,
         dueDate: row.dueDate,
-        amount: row.amount,
+        amount: computedAmount,
         taxRate: row.taxRate,
         status: row.status,
         notes: row.notes,
@@ -540,7 +538,6 @@ export const getInvoiceImportTemplateForUser = async (authHeader) => {
     { header: "due_date", key: "due_date", width: 15 },
     { header: "status", key: "status", width: 14 },
     { header: "tax_rate", key: "tax_rate", width: 12 },
-    { header: "amount", key: "amount", width: 12 },
     { header: "notes", key: "notes", width: 36 },
     { header: "line_items", key: "line_items", width: 56 },
   ];
@@ -552,7 +549,6 @@ export const getInvoiceImportTemplateForUser = async (authHeader) => {
     due_date: "2026-01-24",
     status: "Unpaid",
     tax_rate: 10,
-    amount: 1500,
     notes: "Onboarding invoice",
     line_items: "Consultation|1|1000;Implementation|1|500",
   });
@@ -564,7 +560,6 @@ export const getInvoiceImportTemplateForUser = async (authHeader) => {
     due_date: "",
     status: "",
     tax_rate: "",
-    amount: "",
     notes: "",
     line_items: "",
   });
@@ -575,8 +570,7 @@ export const getInvoiceImportTemplateForUser = async (authHeader) => {
     issue_date: "Use YYYY-MM-DD",
     due_date: "Use YYYY-MM-DD",
     status: "Unpaid/Pending/Paid/Overdue",
-    tax_rate: "Number",
-    amount: "Number",
+    tax_rate: "Number (amount is auto-calculated from line_items + tax_rate)",
     notes: "Optional",
     line_items: "Format: Description|Qty|Rate;Description|Qty|Rate",
   });
