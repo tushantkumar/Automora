@@ -89,6 +89,8 @@ export default function Settings() {
   const [systemSettings, setSystemSettings] = useState<SystemSettingsState>(initialSystemSettings);
   const [loadingSystemSettings, setLoadingSystemSettings] = useState(true);
   const [savingSystemSettings, setSavingSystemSettings] = useState(false);
+  const [confirmSystemUpdateOpen, setConfirmSystemUpdateOpen] = useState(false);
+  const [systemUpdatedPopupOpen, setSystemUpdatedPopupOpen] = useState(false);
   const { toast } = useToast();
 
   const loadIntegrations = async () => {
@@ -168,6 +170,7 @@ export default function Settings() {
         companyName: String(data?.settings?.companyName || ""),
       });
       toast({ title: "System settings saved successfully." });
+      setSystemUpdatedPopupOpen(true);
     } catch {
       toast({ title: "Unable to save system settings.", description: "Please try again." });
     } finally {
@@ -443,7 +446,7 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">Shown in the highlighted support area in automation emails. If left blank, default text is used.</p>
               </div>
 
-              <Button onClick={() => { void saveSystemSettings(); }} disabled={loadingSystemSettings || savingSystemSettings}>
+              <Button onClick={() => setConfirmSystemUpdateOpen(true)} disabled={loadingSystemSettings || savingSystemSettings}>
                 {savingSystemSettings ? "Saving..." : "Save System Settings"}
               </Button>
             </CardContent>
@@ -514,6 +517,44 @@ export default function Settings() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={confirmSystemUpdateOpen} onOpenChange={setConfirmSystemUpdateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Update system settings?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will update company name, SMTP from address, and highlighted support text for future automation emails.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={savingSystemSettings}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={savingSystemSettings}
+              onClick={(event) => {
+                event.preventDefault();
+                setConfirmSystemUpdateOpen(false);
+                void saveSystemSettings();
+              }}
+            >
+              {savingSystemSettings ? "Updating..." : "Update Settings"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={systemUpdatedPopupOpen} onOpenChange={setSystemUpdatedPopupOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>System settings updated</DialogTitle>
+            <DialogDescription>
+              Your changes have been saved successfully.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setSystemUpdatedPopupOpen(false)}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>
