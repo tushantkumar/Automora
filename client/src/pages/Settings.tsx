@@ -5,9 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { User, Bell, Shield, Zap, Mail, Trash2, CreditCard } from "lucide-react";
+import { User, Shield, Zap, Mail, Trash2, CreditCard, Server } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
@@ -51,6 +49,16 @@ type ProfileState = {
 type IntegrationState = {
   connected: boolean;
   connectedEmail: string | null;
+};
+
+type SystemSettingsState = {
+  smtpFrom: string;
+  supportHighlightText: string;
+};
+
+const initialSystemSettings: SystemSettingsState = {
+  smtpFrom: "",
+  supportHighlightText: "",
 };
 
 const initialProfile: ProfileState = {
@@ -78,6 +86,9 @@ export default function Settings() {
   const [sendingDeleteOtp, setSendingDeleteOtp] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteOtp, setDeleteOtp] = useState("");
+  const [systemSettings, setSystemSettings] = useState<SystemSettingsState>(initialSystemSettings);
+  const [loadingSystemSettings, setLoadingSystemSettings] = useState(true);
+  const [savingSystemSettings, setSavingSystemSettings] = useState(false);
   const { toast } = useToast();
 
   const loadIntegrations = async () => {
@@ -102,6 +113,63 @@ export default function Settings() {
       });
     } catch {
       // best effort
+    }
+  };
+
+  const loadSystemSettings = async () => {
+    if (!token) {
+      setLoadingSystemSettings(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/system-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) return;
+
+      setSystemSettings({
+        smtpFrom: String(data?.settings?.smtpFrom || ""),
+        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
+      });
+    } catch {
+      // best effort
+    } finally {
+      setLoadingSystemSettings(false);
+    }
+  };
+
+  const saveSystemSettings = async () => {
+    if (!token) return;
+
+    setSavingSystemSettings(true);
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/system-settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(systemSettings),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast({ title: "Unable to save system settings.", description: data?.message || "Please try again." });
+        return;
+      }
+
+      setSystemSettings({
+        smtpFrom: String(data?.settings?.smtpFrom || ""),
+        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
+      });
+      toast({ title: "System settings saved successfully." });
+    } catch {
+      toast({ title: "Unable to save system settings.", description: "Please try again." });
+    } finally {
+      setSavingSystemSettings(false);
     }
   };
 
@@ -153,6 +221,7 @@ export default function Settings() {
 
     void loadProfile();
     void loadIntegrations();
+    void loadSystemSettings();
   }, [token]);
 
   useEffect(() => {
@@ -303,7 +372,7 @@ export default function Settings() {
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="bg-muted/50 p-1">
           <TabsTrigger value="profile" className="gap-2"><User className="w-4 h-4" /> Profile</TabsTrigger>
-          <TabsTrigger value="notifications" className="gap-2"><Bell className="w-4 h-4" /> Notifications</TabsTrigger>
+          <TabsTrigger value="system" className="gap-2"><Server className="w-4 h-4" /> System</TabsTrigger>
           <TabsTrigger value="security" className="gap-2"><Shield className="w-4 h-4" /> Security</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-2"><Zap className="w-4 h-4" /> Integrations</TabsTrigger>
         </TabsList>
@@ -338,36 +407,40 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="notifications" className="space-y-6">
+        <TabsContent value="system" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>Choose when and how you want to be notified.</CardDescription>
+              <CardTitle>System Preferences</CardTitle>
+              <CardDescription>Configure SMTP sender and highlighted support text for automation emails.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Email Digest</Label>
-                  <p className="text-sm text-muted-foreground">Receive a daily summary of AI activities.</p>
-                </div>
-                <Switch defaultChecked />
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="smtp-from">SMTP From Address</Label>
+                <Input
+                  id="smtp-from"
+                  value={systemSettings.smtpFrom}
+                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, smtpFrom: event.target.value }))}
+                  placeholder="no-reply@automora.local"
+                  disabled={loadingSystemSettings || savingSystemSettings}
+                />
+                <p className="text-xs text-muted-foreground">Used as sender in automation emails. If left blank, default SMTP_FROM is used.</p>
               </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>New Lead Alerts</Label>
-                  <p className="text-sm text-muted-foreground">Instant notification when a new lead is detected.</p>
-                </div>
-                <Switch defaultChecked />
+
+              <div className="space-y-2">
+                <Label htmlFor="support-highlight-text">Highlighted Support Text</Label>
+                <Input
+                  id="support-highlight-text"
+                  value={systemSettings.supportHighlightText}
+                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, supportHighlightText: event.target.value }))}
+                  placeholder="support@automora.local"
+                  disabled={loadingSystemSettings || savingSystemSettings}
+                />
+                <p className="text-xs text-muted-foreground">Shown in the highlighted support area in automation emails. If left blank, default text is used.</p>
               </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>System Updates</Label>
-                  <p className="text-sm text-muted-foreground">Updates about new features and improvements.</p>
-                </div>
-                <Switch />
-              </div>
+
+              <Button onClick={() => { void saveSystemSettings(); }} disabled={loadingSystemSettings || savingSystemSettings}>
+                {savingSystemSettings ? "Saving..." : "Save System Settings"}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

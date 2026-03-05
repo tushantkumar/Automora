@@ -11,6 +11,7 @@ import {
 import { createUserId, normalizeEmail } from "../../utils/auth.js";
 import { classifyIncomingEmail, generateAutomationContent } from "./aiService.js";
 import { buildAutomationEmailLayout } from "./emailLayout.js";
+import { getEffectiveSystemSettingsByUserId } from "../systemSettingsService.js";
 import { createDraftEmail } from "../../db/draftEmailRepository.js";
 import { getEmailIntegrationByProvider, upsertEmailIntegration } from "../../db/emailIntegrationRepository.js";
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI } from "../../config/constants.js";
@@ -118,10 +119,13 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
   const recipient = resolveRecipient(renderContext);
   if (!recipient) throw new Error("No recipient email could be resolved for automation");
 
+  const systemSettings = await getEffectiveSystemSettingsByUserId(userId);
+
   const html = buildAutomationEmailLayout({
     companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Automora",
     bodyHtml: toParagraphHtml(finalBodyText),
     invoice,
+    supportHighlightText: systemSettings.supportHighlightText,
   });
 
   return { to: recipient, subject, body: finalBodyText, html };
@@ -163,11 +167,12 @@ const encodeBase64Url = (value) =>
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 
-const buildRawEmail = ({ to, subject, bodyText, htmlBody, inReplyTo, references }) => {
+const buildRawEmail = ({ to, from, subject, bodyText, htmlBody, inReplyTo, references }) => {
   const normalizedHtmlBody = String(htmlBody || "").trim();
   const normalizedTextBody = String(bodyText || "").trim();
   const headers = [
     `To: ${String(to || "").trim()}`,
+    `From: ${String(from || "").trim()}`,
     `Content-Type: ${normalizedHtmlBody ? "text/html" : "text/plain"}; charset=utf-8`,
     "MIME-Version: 1.0",
     `Subject: ${String(subject || "").trim() || "(no subject)"}`,
@@ -179,7 +184,7 @@ const buildRawEmail = ({ to, subject, bodyText, htmlBody, inReplyTo, references 
   return [...headers, "", normalizedHtmlBody || normalizedTextBody].join("\r\n");
 };
 
-const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody = "", replyToExternalId = "" }) => {
+const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody = "", replyToExternalId = "", from }) => {
   const integration = await getEmailIntegrationByProvider({ userId, provider: "gmail" });
   if (!integration?.access_token) {
     throw new Error("Gmail is not connected");
@@ -247,7 +252,7 @@ const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody =
     threadId = String(replyMessage?.data?.threadId || "").trim();
   }
 
-  const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, htmlBody, inReplyTo, references }));
+  const raw = encodeBase64Url(buildRawEmail({ to, from, subject, bodyText, htmlBody, inReplyTo, references }));
   await gmail.users.messages.send({
     userId: "me",
     requestBody: {
@@ -260,9 +265,12 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
   const rendered = await renderTemplateEmail({ automation, userId, context, bodyTextOverride });
   const replyToExternalId = String(context?.email?.externalId || "").trim();
 
+  const systemSettings = await getEffectiveSystemSettingsByUserId(userId);
+
   await sendViaConnectedGmail({
     userId,
     to: rendered.to,
+    from: systemSettings.smtpFrom,
     subject: rendered.subject,
     bodyText: rendered.body,
     htmlBody: rendered.html,
