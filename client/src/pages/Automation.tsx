@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -142,6 +143,7 @@ const defaultFormValues: FormValues = {
 };
 
 export default function Automation() {
+  const [, navigate] = useLocation();
   const { toast } = useToast();
   const token = localStorage.getItem("authToken") || "";
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -242,6 +244,17 @@ export default function Automation() {
       toast({ title: "Unable to load automation module", description: (error as Error).message });
     });
   }, [page, appliedSearch]);
+
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") !== "true") return;
+
+    void resetForCreate().then(() => {
+      navigate("/automation");
+    });
+  }, []);
 
   useEffect(() => {
     if (action === "CRM") form.setValue("subAction", "Upsert CRM");

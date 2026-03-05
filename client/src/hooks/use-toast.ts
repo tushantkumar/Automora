@@ -4,6 +4,7 @@ import type {
   ToastActionElement,
   ToastProps,
 } from "@/components/ui/toast"
+import { addNotification } from "@/lib/notifications"
 
 const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 1000000
@@ -141,6 +142,13 @@ type Toast = Omit<ToasterToast, "id">
 
 function toast({ ...props }: Toast) {
   const id = genId()
+
+  if (typeof props.title === "string" || typeof props.description === "string") {
+    addNotification(
+      typeof props.title === "string" ? props.title : "Application update",
+      typeof props.description === "string" ? props.description : undefined
+    )
+  }
 
   const update = (props: ToasterToast) =>
     dispatch({
