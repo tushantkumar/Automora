@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Bot, FileText, Receipt, TriangleAlert, TrendingUp, Users } from "lucide-react";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
@@ -268,19 +268,19 @@ export default function Dashboard() {
           <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Automation Active vs Inactive</CardTitle>
-              <CardDescription>Line chart for active and inactive automations.</CardDescription>
+              <CardDescription>Histogram for active and inactive automations.</CardDescription>
             </CardHeader>
             <CardContent className="h-[320px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={automationLineData}>
+                <BarChart data={automationLineData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
                   <Legend />
-                  <Line type="monotone" dataKey="active" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="inactive" stroke="#ef4444" strokeWidth={2.5} dot={{ r: 3 }} />
-                </LineChart>
+                  <Bar dataKey="active" name="Active" fill="#16a34a" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="inactive" name="Inactive" fill="#ef4444" radius={[6, 6, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
