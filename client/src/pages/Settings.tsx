@@ -5,9 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { User, Bell, Shield, Zap, Mail, Trash2, CreditCard } from "lucide-react";
+import { User, Shield, Zap, Mail, Trash2, CreditCard, Server } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
@@ -42,7 +40,6 @@ const AUTH_API_ORIGIN = (() => {
 type ProfileState = {
   name: string;
   email: string;
-  company: string;
   status: string;
   platformTier: string;
   subscriptionPlan: string;
@@ -53,10 +50,19 @@ type IntegrationState = {
   connectedEmail: string | null;
 };
 
+type SystemSettingsState = {
+  supportHighlightText: string;
+  companyName: string;
+};
+
+const initialSystemSettings: SystemSettingsState = {
+  supportHighlightText: "",
+  companyName: "",
+};
+
 const initialProfile: ProfileState = {
   name: "",
   email: "",
-  company: "",
   status: "Active",
   platformTier: "free",
   subscriptionPlan: "Starter",
@@ -78,6 +84,11 @@ export default function Settings() {
   const [sendingDeleteOtp, setSendingDeleteOtp] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteOtp, setDeleteOtp] = useState("");
+  const [systemSettings, setSystemSettings] = useState<SystemSettingsState>(initialSystemSettings);
+  const [loadingSystemSettings, setLoadingSystemSettings] = useState(true);
+  const [savingSystemSettings, setSavingSystemSettings] = useState(false);
+  const [confirmSystemUpdateOpen, setConfirmSystemUpdateOpen] = useState(false);
+  const [systemUpdatedPopupOpen, setSystemUpdatedPopupOpen] = useState(false);
   const { toast } = useToast();
 
   const loadIntegrations = async () => {
@@ -102,6 +113,64 @@ export default function Settings() {
       });
     } catch {
       // best effort
+    }
+  };
+
+  const loadSystemSettings = async () => {
+    if (!token) {
+      setLoadingSystemSettings(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/system-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) return;
+
+      setSystemSettings({
+        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
+        companyName: String(data?.settings?.companyName || ""),
+      });
+    } catch {
+      // best effort
+    } finally {
+      setLoadingSystemSettings(false);
+    }
+  };
+
+  const saveSystemSettings = async () => {
+    if (!token) return;
+
+    setSavingSystemSettings(true);
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/system-settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(systemSettings),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast({ title: "Unable to save system settings.", description: data?.message || "Please try again." });
+        return;
+      }
+
+      setSystemSettings({
+        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
+        companyName: String(data?.settings?.companyName || ""),
+      });
+      toast({ title: "System settings saved successfully." });
+      setSystemUpdatedPopupOpen(true);
+    } catch {
+      toast({ title: "Unable to save system settings.", description: "Please try again." });
+    } finally {
+      setSavingSystemSettings(false);
     }
   };
 
@@ -135,11 +204,6 @@ export default function Settings() {
         setProfile({
           name: String(meData?.user?.name || ""),
           email: String(meData?.user?.email || ""),
-          company: String(
-            onboardingData?.details?.organization_name
-              || meData?.user?.organizationName
-              || "",
-          ),
           status: String(meData?.user?.status || "Active"),
           platformTier: String(meData?.user?.platformTier || "free"),
           subscriptionPlan: String(meData?.user?.subscriptionPlan || "Starter"),
@@ -153,6 +217,7 @@ export default function Settings() {
 
     void loadProfile();
     void loadIntegrations();
+    void loadSystemSettings();
   }, [token]);
 
   useEffect(() => {
@@ -303,7 +368,7 @@ export default function Settings() {
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="bg-muted/50 p-1">
           <TabsTrigger value="profile" className="gap-2"><User className="w-4 h-4" /> Profile</TabsTrigger>
-          <TabsTrigger value="notifications" className="gap-2"><Bell className="w-4 h-4" /> Notifications</TabsTrigger>
+          <TabsTrigger value="system" className="gap-2"><Server className="w-4 h-4" /> System</TabsTrigger>
           <TabsTrigger value="security" className="gap-2"><Shield className="w-4 h-4" /> Security</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-2"><Zap className="w-4 h-4" /> Integrations</TabsTrigger>
         </TabsList>
@@ -326,10 +391,6 @@ export default function Settings() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="company">Company Name</Label>
-                <Input id="company" value={profile.company} readOnly disabled={loadingProfile} />
-              </div>
-              <div className="space-y-2">
                 <Label htmlFor="status">Status</Label>
                 <Input id="status" value={profile.status} readOnly disabled={loadingProfile} />
               </div>
@@ -338,36 +399,41 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="notifications" className="space-y-6">
+        <TabsContent value="system" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>Choose when and how you want to be notified.</CardDescription>
+              <CardTitle>System Preferences</CardTitle>
+              <CardDescription>Configure company name and highlighted support text for automation emails.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Email Digest</Label>
-                  <p className="text-sm text-muted-foreground">Receive a daily summary of AI activities.</p>
-                </div>
-                <Switch defaultChecked />
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="company-name">Company Name</Label>
+                <Input
+                  id="company-name"
+                  value={systemSettings.companyName}
+                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, companyName: event.target.value }))}
+                  placeholder="Automora"
+                  disabled={loadingSystemSettings || savingSystemSettings}
+                />
+                <p className="text-xs text-muted-foreground">Displayed as company name in automation emails.</p>
               </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>New Lead Alerts</Label>
-                  <p className="text-sm text-muted-foreground">Instant notification when a new lead is detected.</p>
-                </div>
-                <Switch defaultChecked />
+
+
+              <div className="space-y-2">
+                <Label htmlFor="support-highlight-text">Highlighted Support Text</Label>
+                <Input
+                  id="support-highlight-text"
+                  value={systemSettings.supportHighlightText}
+                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, supportHighlightText: event.target.value }))}
+                  placeholder="support@automora.local"
+                  disabled={loadingSystemSettings || savingSystemSettings}
+                />
+                <p className="text-xs text-muted-foreground">Shown in the highlighted support area in automation emails. If left blank, default text is used.</p>
               </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>System Updates</Label>
-                  <p className="text-sm text-muted-foreground">Updates about new features and improvements.</p>
-                </div>
-                <Switch />
-              </div>
+
+              <Button onClick={() => setConfirmSystemUpdateOpen(true)} disabled={loadingSystemSettings || savingSystemSettings}>
+                {savingSystemSettings ? "Saving..." : "Save System Settings"}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -436,6 +502,41 @@ export default function Settings() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={confirmSystemUpdateOpen} onOpenChange={setConfirmSystemUpdateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Update system settings?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={savingSystemSettings}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={savingSystemSettings}
+              onClick={(event) => {
+                event.preventDefault();
+                setConfirmSystemUpdateOpen(false);
+                void saveSystemSettings();
+              }}
+            >
+              {savingSystemSettings ? "Updating..." : "Update Settings"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={systemUpdatedPopupOpen} onOpenChange={setSystemUpdatedPopupOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>System settings updated</DialogTitle>
+            <DialogDescription>
+              Your changes have been saved successfully.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setSystemUpdatedPopupOpen(false)}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>

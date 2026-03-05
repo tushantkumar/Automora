@@ -224,6 +224,18 @@ export const upsertOnboardingDetails = async ({
   );
 };
 
+export const upsertOrganizationNameByUserId = async ({ userId, organizationName }) => {
+  await pool.query(
+    `INSERT INTO auth_onboarding_details (user_id, organization_name, selected_automations, updated_at)
+     VALUES ($1, $2, '[]'::jsonb, NOW())
+     ON CONFLICT (user_id)
+     DO UPDATE SET
+       organization_name = EXCLUDED.organization_name,
+       updated_at = NOW()`,
+    [userId, organizationName],
+  );
+};
+
 export const getOnboardingDetailsByUserId = async (userId) => {
   const res = await pool.query(
     `SELECT

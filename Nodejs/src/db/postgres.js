@@ -244,6 +244,15 @@ export const initDatabase = async () => {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_system_settings (
+      user_id TEXT PRIMARY KEY REFERENCES auth_users(id) ON DELETE CASCADE,
+      smtp_from TEXT,
+      support_highlight_text TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
     INSERT INTO auth_mail_templates (id, user_id, name, subject, body)
     SELECT
       md5(u.id || '-seed-template'),
@@ -301,4 +310,5 @@ export const ensureDatabaseIndexes = async () => {
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_automations_user_id_idx ON auth_automations(user_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_automations_trigger_type_idx ON auth_automations(trigger_type);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_draft_emails_user_id_idx ON auth_draft_emails(user_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_system_settings_user_id_idx ON auth_system_settings(user_id);`);
 };

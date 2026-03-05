@@ -6,6 +6,7 @@ import invoiceRouter from "./routes/invoiceRoutes.js";
 import emailIntegrationRouter from "./routes/emailIntegrationRoutes.js";
 import mailTemplateRouter from "./routes/mailTemplateRoutes.js";
 import automationRouter from "./routes/automationRoutes.js";
+import systemSettingsRouter from "./routes/systemSettingsRoutes.js";
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use(invoiceRouter);
 app.use(emailIntegrationRouter);
 app.use(mailTemplateRouter);
 app.use(automationRouter);
+app.use(systemSettingsRouter);
 
 // centralized error handler
 app.use((error, _req, res, _next) => {

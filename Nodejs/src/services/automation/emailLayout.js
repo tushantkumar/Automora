@@ -114,7 +114,7 @@ const invoiceSummarySection = (invoice) => {
   `;
 };
 
-export const buildAutomationEmailLayout = ({ companyName, bodyHtml, invoice }) => `
+export const buildAutomationEmailLayout = ({ companyName, bodyHtml, invoice, supportHighlightText }) => `
   <!doctype html>
   <html>
     <body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
@@ -136,7 +136,7 @@ export const buildAutomationEmailLayout = ({ companyName, bodyHtml, invoice }) =
               </tr>
               <tr>
                 <td style="padding:16px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;color:#475569;font-size:12px;">
-                  Need help? Contact support at <a href="mailto:support@automora.local" style="color:#4f46e5;text-decoration:none;">support@automora.local</a>
+                  Need help? Contact support at <a href="mailto:${escapeHtml(supportHighlightText || "support@automora.local")}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(supportHighlightText || "support@automora.local")}</a>
                 </td>
               </tr>
             </table>
