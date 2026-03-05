@@ -1,10 +1,9 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Bot, FileText, Receipt, TriangleAlert, TrendingUp, Users } from "lucide-react";
+import { Bot, FileText, Receipt, TriangleAlert, TrendingUp, Users, LogOut } from "lucide-react";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
 
@@ -95,6 +94,7 @@ const toAutomationLineData = (automations: Automation[]) => {
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
+  const [fullName, setFullName] = useState("User");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
@@ -129,6 +129,7 @@ export default function Dashboard() {
             navigate("/onboarding");
             return;
           }
+          if (meData?.user?.name) setFullName(meData.user.name);
         }
 
         if (customerResponse.ok) {
@@ -163,6 +164,11 @@ export default function Dashboard() {
     void loadDashboardData();
   }, [navigate]);
 
+  const handleLogout = () => {
+    localStorage.removeItem("authToken");
+    navigate("/");
+  };
+
   const activeAutomationCount = useMemo(() => automations.filter((item) => Boolean(item?.is_active)).length, [automations]);
   const overdueInvoiceCount = Number(invoiceInsights.total_overdue || 0);
   const recentCustomers = useMemo(() => toRecentCustomers(customers), [customers]);
@@ -184,8 +190,7 @@ export default function Dashboard() {
       <div className="space-y-6">
         <div className="rounded-2xl border bg-gradient-to-r from-violet-50 via-background to-blue-50 p-6">
           <h1 className="text-3xl font-bold text-foreground">Dashboard Overview</h1>
-          <p className="text-muted-foreground mt-1">Beautiful, real-time visibility across customers, invoices, and automations.</p>
-          <div className="mt-4"><Badge variant="secondary">Live analytics</Badge></div>
+          <p className="text-muted-foreground mt-1">Welcome back, {fullName}. Here's what's happening today.</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -207,6 +212,24 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <Card className="shadow-sm">
             <CardHeader>
+              <CardTitle>Invoice chart</CardTitle>
+              <CardDescription>Bar chart based on invoice issue date.</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={invoiceBarData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="invoices" fill="#7c3aed" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardHeader>
               <CardTitle>Recent Customer Activity</CardTitle>
               <CardDescription>Latest 5 customers by updated time.</CardDescription>
             </CardHeader>
@@ -222,6 +245,29 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground">{new Date(customer.updated_at || customer.created_at || Date.now()).toLocaleString()}</p>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle>Automation Active vs Inactive</CardTitle>
+              <CardDescription>Histogram for active and inactive automations.</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={automationLineData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="active" name="Active" fill="#16a34a" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="inactive" name="Inactive" fill="#ef4444" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </CardContent>
           </Card>
 
@@ -242,46 +288,6 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground">{new Date(invoice.updated_at || invoice.created_at || Date.now()).toLocaleString()}</p>
                 </div>
               ))}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Invoice Issued Trend</CardTitle>
-              <CardDescription>Bar chart based on invoice issue date.</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={invoiceBarData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" />
-                  <YAxis allowDecimals={false} />
-                  <Tooltip />
-                  <Bar dataKey="invoices" fill="#7c3aed" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Automation Active vs Inactive</CardTitle>
-              <CardDescription>Histogram for active and inactive automations.</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={automationLineData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" />
-                  <YAxis allowDecimals={false} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="active" name="Active" fill="#16a34a" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="inactive" name="Inactive" fill="#ef4444" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
             </CardContent>
           </Card>
         </div>
