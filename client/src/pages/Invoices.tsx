@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Plus, Download, Send, Pencil, Trash2, X, CalendarDays } from "lucide-react";
+import { Search, Plus, Download, Send, Pencil, Trash2, X, CalendarDays, Upload } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
@@ -88,6 +88,8 @@ export default function Invoices() {
   const [confirmDescription, setConfirmDescription] = useState("");
   const [confirmAction, setConfirmAction] = useState<null | (() => void)>(null);
   const { toast } = useToast();
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const openConfirmDialog = (title: string, description: string, onConfirm: () => void) => {
     setConfirmTitle(title);
@@ -352,6 +354,85 @@ export default function Invoices() {
   };
 
 
+
+  const downloadInvoiceUploadTemplate = async () => {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/invoices/upload/template`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        toast({ title: "Unable to download template", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || "invoice-upload-template.xlsx";
+
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch {
+      toast({ title: "Unable to download template", description: "Please try again." });
+    }
+  };
+
+  const uploadInvoicesExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !token) return;
+
+    setIsUploading(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+      });
+      const fileData = btoa(binary);
+
+      const response = await fetch(`${AUTH_API_URL}/invoices/upload/excel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fileData }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast({ title: "Invoice upload failed", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const createdCount = Number(data?.createdCount || 0);
+      const failedCount = Number(data?.failedCount || 0);
+      const firstError = Array.isArray(data?.errors) ? data.errors[0] : "";
+      toast({
+        title: "Invoice upload completed",
+        description: failedCount > 0
+          ? `${createdCount} created, ${failedCount} failed. ${firstError}`
+          : `${createdCount} invoices created successfully.`,
+      });
+
+      void loadInvoices();
+      void loadInsights();
+    } catch {
+      toast({ title: "Invoice upload failed", description: "Please try again." });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const downloadInvoicesExcel = async () => {
     if (!token) return;
 
@@ -548,6 +629,9 @@ export default function Invoices() {
             <span className="text-sm text-muted-foreground">to</span>
             <div className="relative"><CalendarDays className="w-4 h-4 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2" /><Input type="date" className="pl-8" value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
             <Button variant="outline" size="sm" onClick={() => { setInvoiceNumberFilter(""); setFromDate(""); setToDate(""); }}>Reset</Button>
+            <Button variant="outline" size="sm" onClick={() => { void downloadInvoiceUploadTemplate(); }}><Download className="w-4 h-4 mr-2" /> Download Upload Template</Button>
+            <input ref={uploadInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { void uploadInvoicesExcel(event); }} />
+            <Button variant="outline" size="sm" disabled={isUploading} onClick={() => uploadInputRef.current?.click()}><Upload className="w-4 h-4 mr-2" /> {isUploading ? "Uploading..." : "Upload Excel"}</Button>
             <Button variant="outline" size="sm" onClick={() => { void downloadInvoicesExcel(); }}><Download className="w-4 h-4 mr-2" /> Export Report</Button>
           </div>
         </div>
