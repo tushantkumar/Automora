@@ -1,56 +1,98 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Clock, Download, Plus, FileText, Zap, Users, Wallet, AlertTriangle } from "lucide-react";
 import { useLocation } from "wouter";
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
 
-type Customer = { id: string };
-type Invoice = { amount: number | string; status?: string };
+type Customer = { id: string; name?: string; client?: string; status?: string; updated_at?: string; created_at?: string };
+type Invoice = {
+  id: string;
+  invoice_number?: string;
+  client_name?: string;
+  amount?: number | string;
+  status?: string;
+  issue_date?: string;
+  updated_at?: string;
+  created_at?: string;
+};
 type InvoiceInsights = { total_revenue: number; total_invoices: number; total_overdue?: number };
-type Automation = { id: string; is_active?: boolean };
+type Automation = { id: string; name?: string; is_active?: boolean; created_at?: string; updated_at?: string };
 type MailTemplate = { id: string };
 
 const emptyInvoiceInsights: InvoiceInsights = { total_revenue: 0, total_invoices: 0, total_overdue: 0 };
 
-const activityFeed = [
-  { label: "Invoice generated", time: "2m ago", color: "bg-emerald-500" },
-  { label: "Customer updated by AI", time: "15m ago", color: "bg-blue-500" },
-  { label: "Automation draft queued", time: "1h ago", color: "bg-amber-500" },
-];
-
 const amountFormatter = (value: number | string) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "$0";
-  return `$${parsed.toLocaleString()}`;
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed)) return "$0.00";
+  return `$${parsed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const toMonthlyRevenue = (invoices: Invoice[]) => {
-  const now = new Date();
-  const rows = Array.from({ length: 6 }, (_, idx) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - (5 - idx), 1);
-    return {
-      month: date.toLocaleString("en-US", { month: "short" }),
-      value: 0,
-    };
+const toEpoch = (value?: string) => {
+  const date = new Date(String(value || ""));
+  const time = date.getTime();
+  return Number.isNaN(time) ? 0 : time;
+};
+
+const toRecentCustomers = (customers: Customer[]) => [...customers]
+  .sort((a, b) => toEpoch(b.updated_at || b.created_at) - toEpoch(a.updated_at || a.created_at))
+  .slice(0, 5);
+
+const toRecentInvoices = (invoices: Invoice[]) => [...invoices]
+  .sort((a, b) => toEpoch(b.updated_at || b.created_at) - toEpoch(a.updated_at || a.created_at))
+  .slice(0, 5);
+
+const toInvoiceBarData = (invoices: Invoice[]) => {
+  const buckets = new Map<string, number>();
+  invoices.forEach((invoice) => {
+    const parsed = new Date(String(invoice.issue_date || ""));
+    if (Number.isNaN(parsed.getTime())) return;
+    const key = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}`;
+    buckets.set(key, (buckets.get(key) || 0) + 1);
   });
 
-  // Fallback: distribute total invoice amounts in a simple deterministic way for visual overview.
-  invoices.forEach((invoice, idx) => {
-    const amount = Number(invoice?.amount || 0);
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    rows[idx % rows.length].value += amount;
+  return Array.from(buckets.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-8)
+    .map(([key, count]) => {
+      const [year, month] = key.split("-");
+      const d = new Date(Number(year), Number(month) - 1, 1);
+      return {
+        label: d.toLocaleString("en-US", { month: "short", year: "2-digit" }),
+        invoices: count,
+      };
+    });
+};
+
+const toAutomationLineData = (automations: Automation[]) => {
+  const buckets = new Map<string, { active: number; inactive: number }>();
+
+  automations.forEach((automation) => {
+    const parsed = new Date(String(automation.updated_at || automation.created_at || ""));
+    if (Number.isNaN(parsed.getTime())) return;
+    const key = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}`;
+    const row = buckets.get(key) || { active: 0, inactive: 0 };
+    if (automation.is_active) row.active += 1;
+    else row.inactive += 1;
+    buckets.set(key, row);
   });
 
-  return rows;
+  return Array.from(buckets.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-8)
+    .map(([key, values]) => {
+      const [year, month] = key.split("-");
+      const d = new Date(Number(year), Number(month) - 1, 1);
+      return {
+        label: d.toLocaleString("en-US", { month: "short", year: "2-digit" }),
+        ...values,
+      };
+    });
 };
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
-  const [fullName, setFullName] = useState("User");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
@@ -85,7 +127,6 @@ export default function Dashboard() {
             navigate("/onboarding");
             return;
           }
-          if (meData?.user?.name) setFullName(meData.user.name);
         }
 
         if (customerResponse.ok) {
@@ -120,67 +161,97 @@ export default function Dashboard() {
     void loadDashboardData();
   }, [navigate]);
 
-  const revenueByMonth = useMemo(() => toMonthlyRevenue(invoices), [invoices]);
-  const activeAutomations = useMemo(() => automations.filter((item) => Boolean(item?.is_active)).length, [automations]);
-  const pausedAutomations = Math.max(automations.length - activeAutomations, 0);
-  const overdueInvoices = Number(invoiceInsights.total_overdue || 0);
+  const activeAutomationCount = useMemo(() => automations.filter((item) => Boolean(item?.is_active)).length, [automations]);
+  const overdueInvoiceCount = Number(invoiceInsights.total_overdue || 0);
+  const recentCustomers = useMemo(() => toRecentCustomers(customers), [customers]);
+  const recentInvoices = useMemo(() => toRecentInvoices(invoices), [invoices]);
+  const invoiceBarData = useMemo(() => toInvoiceBarData(invoices), [invoices]);
+  const automationLineData = useMemo(() => toAutomationLineData(automations), [automations]);
 
-  const cards = [
-    { label: "Active Customers", value: String(customers.length), icon: Users, tint: "text-blue-600" },
-    { label: "Total Revenue", value: amountFormatter(invoiceInsights.total_revenue), icon: Wallet, tint: "text-emerald-600" },
-    { label: "Overdue Invoices", value: String(overdueInvoices), icon: AlertTriangle, tint: "text-rose-600" },
-    { label: "Active Automations", value: String(activeAutomations), icon: Zap, tint: "text-violet-600" },
-    { label: "Mail Templates", value: String(templates.length), icon: FileText, tint: "text-cyan-600" },
+  const kpis = [
+    { label: "Total Customer", value: String(customers.length) },
+    { label: "Total Invoice", value: String(invoiceInsights.total_invoices || 0) },
+    { label: "Overdue Invoice", value: String(overdueInvoiceCount) },
+    { label: "Active Automation", value: String(activeAutomationCount) },
+    { label: "Total Mail Template", value: String(templates.length) },
+    { label: "Total Revenue", value: amountFormatter(invoiceInsights.total_revenue) },
   ];
 
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Business Overview</h1>
-            <p className="text-muted-foreground mt-1">Everything is running smoothly today, {fullName}.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1 rounded-full border border-border">
-              <Clock className="w-4 h-4" />
-              <span>Last sync: 2 mins ago</span>
-            </div>
-            <Button className="gap-2 bg-violet-600 hover:bg-violet-700"><Plus className="w-4 h-4" />New Workflow</Button>
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">Overview of customer, invoice, and automation activity.</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
-          {cards.map((card) => (
-            <Card key={card.label}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+          {kpis.map((kpi) => (
+            <Card key={kpi.label}>
               <CardHeader className="pb-2">
-                <CardDescription className="text-xs uppercase tracking-wide">{card.label}</CardDescription>
-                <CardTitle className="text-3xl flex items-center justify-between">
-                  {card.value}
-                  <card.icon className={`w-5 h-5 ${card.tint}`} />
-                </CardTitle>
+                <CardDescription className="text-xs uppercase tracking-wide">{kpi.label}</CardDescription>
+                <CardTitle className="text-2xl">{kpi.value}</CardTitle>
               </CardHeader>
             </Card>
           ))}
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <Card className="xl:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Revenue Growth</CardTitle>
-                <CardDescription>Monthly revenue performance</CardDescription>
-              </div>
-              <Button variant="outline" size="sm" className="gap-1"><Download className="w-3.5 h-3.5" />Download Report</Button>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Customer Activity</CardTitle>
+              <CardDescription>Latest 5 customers by updated time.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {recentCustomers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No customer activity yet.</p>
+              ) : recentCustomers.map((customer) => (
+                <div key={customer.id} className="rounded-md border p-3 flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-sm">{customer.name || customer.client || "Unknown"}</p>
+                    <p className="text-xs text-muted-foreground">{customer.status || "-"}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{new Date(customer.updated_at || customer.created_at || Date.now()).toLocaleString()}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Invoice Activity</CardTitle>
+              <CardDescription>Latest 5 invoices by updated time.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {recentInvoices.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No invoice activity yet.</p>
+              ) : recentInvoices.map((invoice) => (
+                <div key={invoice.id} className="rounded-md border p-3 flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-sm">{invoice.invoice_number || invoice.id}</p>
+                    <p className="text-xs text-muted-foreground">{invoice.status || "-"} • {invoice.client_name || "-"}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{new Date(invoice.updated_at || invoice.created_at || Date.now()).toLocaleString()}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Invoice Issued Trend</CardTitle>
+              <CardDescription>Bar chart based on invoice issue date.</CardDescription>
             </CardHeader>
             <CardContent className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={revenueByMonth}>
+                <BarChart data={invoiceBarData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip formatter={(v) => amountFormatter(Number(v || 0))} />
-                  <Bar dataKey="value" fill="#7c3aed" radius={[6, 6, 0, 0]} />
+                  <XAxis dataKey="label" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="invoices" fill="#7c3aed" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -188,60 +259,20 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Automation Status</CardTitle>
-              <CardDescription>Distribution of workflows</CardDescription>
+              <CardTitle>Automation Active vs Inactive</CardTitle>
+              <CardDescription>Line chart of active/inactive automations by update month.</CardDescription>
             </CardHeader>
-            <CardContent className="pt-10">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <p className="text-2xl font-bold">{activeAutomations}</p>
-                  <p className="text-xs text-muted-foreground uppercase">Active</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{pausedAutomations}</p>
-                  <p className="text-xs text-muted-foreground uppercase">Paused</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">0</p>
-                  <p className="text-xs text-muted-foreground uppercase">Draft</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Recent System Activity</CardTitle>
-              <Button variant="link" className="text-violet-600 px-0">View All</Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {activityFeed.map((item) => (
-                <div key={item.label} className="rounded-lg border bg-muted/30 px-4 py-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className={`inline-block w-2 h-2 rounded-full ${item.color}`} />
-                    <span>{item.label}</span>
-                  </div>
-                  <span className="text-xs text-muted-foreground">{item.time}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="bg-violet-50/50 border-violet-100">
-            <CardHeader>
-              <CardTitle>Quick Intelligence</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                "New Template",
-                "Sync CRM",
-                "Review Invoices",
-                "AI Insights",
-              ].map((item) => (
-                <Button key={item} variant="outline" className="h-14 border-violet-200 text-violet-700">{item}</Button>
-              ))}
+            <CardContent className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={automationLineData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="active" stroke="#16a34a" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="inactive" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
             </CardContent>
           </Card>
         </div>
