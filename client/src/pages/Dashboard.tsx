@@ -188,17 +188,17 @@ export default function Dashboard() {
           <div className="mt-4"><Badge variant="secondary">Live analytics</Badge></div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {kpis.map((kpi) => (
-            <Card key={kpi.label} className="hover:shadow-md transition-shadow">
-              <CardHeader className="pb-2">
+            <Card key={kpi.label} className="hover:shadow-lg transition-all duration-200 min-h-[160px]">
+              <CardHeader className="pb-3">
                 <div className="flex items-center justify-between gap-3">
                   <CardDescription className="text-xs uppercase tracking-wide">{kpi.label}</CardDescription>
-                  <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${kpi.iconBg}`}>
-                    <kpi.icon className={`h-4 w-4 ${kpi.iconColor}`} />
+                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${kpi.iconBg}`}>
+                    <kpi.icon className={`h-5 w-5 ${kpi.iconColor}`} />
                   </div>
                 </div>
-                <CardTitle className="text-2xl mt-2">{kpi.value}</CardTitle>
+                <CardTitle className="text-3xl mt-3">{kpi.value}</CardTitle>
               </CardHeader>
             </Card>
           ))}
