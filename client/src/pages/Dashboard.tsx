@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { ArrowUpRight, Clock, LogOut, MoreHorizontal } from "lucide-react";
+import { ArrowUpRight, Bot, Clock, FileText, LogOut, Mail, MoreHorizontal, Users } from "lucide-react";
+import { Pie, PieChart, Cell, Bar, BarChart, CartesianGrid, XAxis, YAxis, Line, LineChart } from "recharts";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
 
 type Customer = { id: string; name?: string; status?: string; value?: string };
 type Invoice = { id: string; status?: string; amount?: number | string; due_date?: string };
 type InvoiceInsights = { total_revenue: number; total_invoices: number; total_paid: number; total_unpaid: number; total_overdue: number };
-type Automation = { id: string; is_active?: boolean; trigger_type?: string; action_type?: string };
-type Template = { id: string; name?: string; created_at?: string };
-type Email = { id: string; replied_at?: string | null; received_at?: string | null };
+type Automation = { id: string; is_active?: boolean };
+type Template = { id: string };
+type Email = { id: string; replied_at?: string | null };
 
 const emptyInvoiceInsights: InvoiceInsights = {
   total_revenue: 0,
@@ -35,12 +37,7 @@ const parseCurrencyString = (value?: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
-};
+const PIE_COLORS = ["#4f46e5", "#f59e0b", "#ef4444"];
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
@@ -127,85 +124,102 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const topLineCards = useMemo(() => ([
-    {
-      label: "Total Customers",
-      value: String(customers.length),
-      change: `${customers.filter((item) => item.status === "Active").length} active`,
-      trend: customers.length > 0 ? "up" : "neutral",
-    },
-    {
-      label: "Total Revenue",
-      value: amountFormatter(invoiceInsights.total_revenue),
-      change: `${invoiceInsights.total_invoices} invoices`,
-      trend: invoiceInsights.total_revenue > 0 ? "up" : "neutral",
-    },
-    {
-      label: "Active Automations",
-      value: String(automations.filter((item) => Boolean(item?.is_active)).length),
-      change: `${automations.length} total automations`,
-      trend: automations.some((item) => item?.is_active) ? "up" : "neutral",
-    },
-    {
-      label: "Mail Templates",
-      value: String(templates.length),
-      change: `${emails.length} inbox emails`,
-      trend: templates.length > 0 ? "up" : "neutral",
-    },
-  ]), [automations, customers, emails.length, invoiceInsights.total_invoices, invoiceInsights.total_revenue, templates.length]);
-
   const report = useMemo(() => {
-    const overdueInvoices = invoices.filter((invoice) => String(invoice.status || "").toLowerCase() === "overdue");
-    const paidInvoices = invoices.filter((invoice) => String(invoice.status || "").toLowerCase() === "paid");
-    const unpaidInvoices = invoices.filter((invoice) => {
+    const paidCount = invoices.filter((invoice) => String(invoice.status || "").toLowerCase() === "paid").length;
+    const unpaidCount = invoices.filter((invoice) => {
       const status = String(invoice.status || "").toLowerCase();
       return status === "unpaid" || status === "pending" || status === "draft";
-    });
-
+    }).length;
+    const overdueCount = invoices.filter((invoice) => String(invoice.status || "").toLowerCase() === "overdue").length;
     const totalCustomerValue = customers.reduce((sum, customer) => sum + parseCurrencyString(customer.value), 0);
     const repliedEmails = emails.filter((email) => Boolean(email.replied_at)).length;
 
-    return {
-      overdueInvoices,
-      paidInvoices,
-      unpaidInvoices,
-      totalCustomerValue,
-      repliedEmails,
-    };
+    return { paidCount, unpaidCount, overdueCount, totalCustomerValue, repliedEmails };
   }, [customers, emails, invoices]);
+
+  const kpis = useMemo(() => ([
+    { label: "Customers", value: String(customers.length), helper: `${customers.filter((item) => item.status === "Active").length} active`, icon: Users },
+    { label: "Revenue", value: amountFormatter(invoiceInsights.total_revenue), helper: `${invoiceInsights.total_invoices} invoices`, icon: FileText },
+    { label: "Automations", value: String(automations.filter((item) => item.is_active).length), helper: `${automations.length} total`, icon: Bot },
+    { label: "Inbox", value: String(emails.length), helper: `${templates.length} templates`, icon: Mail },
+  ]), [automations, customers, emails.length, invoiceInsights.total_invoices, invoiceInsights.total_revenue, templates.length]);
+
+  const invoiceStatusPie = useMemo(() => ([
+    { status: "Paid", value: report.paidCount, fill: "var(--color-paid)" },
+    { status: "Unpaid", value: report.unpaidCount, fill: "var(--color-unpaid)" },
+    { status: "Overdue", value: report.overdueCount, fill: "var(--color-overdue)" },
+  ]), [report.overdueCount, report.paidCount, report.unpaidCount]);
+
+  const invoiceStatusConfig = {
+    paid: { label: "Paid", color: PIE_COLORS[0] },
+    unpaid: { label: "Unpaid", color: PIE_COLORS[1] },
+    overdue: { label: "Overdue", color: PIE_COLORS[2] },
+  };
+
+  const moduleHistogramData = useMemo(() => ([
+    { module: "Customers", total: customers.length },
+    { module: "Invoices", total: invoiceInsights.total_invoices },
+    { module: "Automations", total: automations.length },
+    { module: "Templates", total: templates.length },
+    { module: "Inbox", total: emails.length },
+  ]), [automations.length, customers.length, emails.length, invoiceInsights.total_invoices, templates.length]);
+
+  const moduleHistogramConfig = {
+    total: { label: "Records", color: "#6366f1" },
+  };
+
+  const revenueTrendData = useMemo(() => ([
+    { name: "Paid", value: Number(invoiceInsights.total_paid || 0) },
+    { name: "Unpaid", value: Number(invoiceInsights.total_unpaid || 0) },
+    { name: "Overdue", value: Number(invoiceInsights.total_overdue || 0) },
+    { name: "Revenue", value: Number(invoiceInsights.total_revenue || 0) },
+  ]), [invoiceInsights.total_overdue, invoiceInsights.total_paid, invoiceInsights.total_revenue, invoiceInsights.total_unpaid]);
+
+  const revenueTrendConfig = {
+    value: { label: "Amount", color: "#14b8a6" },
+  };
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Welcome back, {fullName}. Cross-page insight report is ready.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1 rounded-full border border-border">
-            <Clock className="w-4 h-4" />
-            <span>Live snapshot</span>
+      <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-r from-indigo-500/10 via-violet-500/5 to-emerald-500/10 p-6 mb-6">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.15),transparent_50%)] pointer-events-none" />
+        <div className="relative flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
+            <p className="text-muted-foreground mt-1">Hi {fullName}, your business insight cockpit is ready.</p>
           </div>
-          <Button variant="outline" onClick={handleLogout} className="gap-2">
-            <LogOut className="w-4 h-4" />
-            Logout
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-background/70 px-3 py-1 rounded-full border border-border backdrop-blur">
+              <Clock className="w-4 h-4" />
+              <span>Live snapshot</span>
+            </div>
+            <Button variant="outline" onClick={handleLogout} className="gap-2 bg-background/70">
+              <LogOut className="w-4 h-4" />
+              Logout
+            </Button>
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        {topLineCards.map((stat) => (
-          <Card key={stat.label} className="shadow-sm hover:shadow-md transition-shadow border-muted">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{stat.label}</CardTitle>
-              {stat.trend === "up" ? <ArrowUpRight className="h-4 w-4 text-emerald-500" /> : <MoreHorizontal className="h-4 w-4 text-muted-foreground" />}
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold font-heading">{stat.value}</div>
-              <p className="text-xs text-muted-foreground mt-1">{stat.change}</p>
-            </CardContent>
-          </Card>
-        ))}
+        {kpis.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <Card key={stat.label} className="shadow-sm hover:shadow-md transition-shadow border-muted">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                <CardTitle className="text-sm font-medium text-muted-foreground">{stat.label}</CardTitle>
+                <div className="flex items-center gap-2 text-primary">
+                  <Icon className="h-4 w-4" />
+                  <ArrowUpRight className="h-4 w-4 text-emerald-500" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold font-heading">{stat.value}</div>
+                <p className="text-xs text-muted-foreground mt-1">{stat.helper}</p>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <Card className="p-4">
@@ -219,16 +233,53 @@ export default function Dashboard() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Invoice Paid</p><p className="text-2xl font-semibold">{amountFormatter(invoiceInsights.total_paid)}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Invoice Unpaid</p><p className="text-2xl font-semibold">{amountFormatter(invoiceInsights.total_unpaid)}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Invoice Overdue</p><p className="text-2xl font-semibold">{amountFormatter(invoiceInsights.total_overdue)}</p></CardContent></Card>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader className="pb-1"><CardTitle className="text-base">Module Distribution (Histogram)</CardTitle></CardHeader>
+                <CardContent>
+                  <ChartContainer config={moduleHistogramConfig} className="h-[300px] w-full">
+                    <BarChart data={moduleHistogramData} margin={{ left: 8, right: 8 }}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis dataKey="module" tickLine={false} axisLine={false} />
+                      <YAxis tickLine={false} axisLine={false} allowDecimals={false} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Bar dataKey="total" fill="var(--color-total)" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-1"><CardTitle className="text-base">Invoice Status Split (Pie)</CardTitle></CardHeader>
+                <CardContent>
+                  <ChartContainer config={invoiceStatusConfig} className="h-[300px] w-full">
+                    <PieChart>
+                      <ChartTooltip content={<ChartTooltipContent nameKey="status" />} />
+                      <Pie data={invoiceStatusPie} dataKey="value" nameKey="status" innerRadius={70} outerRadius={110} strokeWidth={4}>
+                        {invoiceStatusPie.map((entry, index) => <Cell key={`${entry.status}-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
+                      </Pie>
+                      <ChartLegend content={<ChartLegendContent nameKey="status" />} />
+                    </PieChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
             </div>
+
             <Card>
-              <CardContent className="p-4 space-y-2">
-                <p className="text-sm font-medium">Insight Report Summary</p>
-                <p className="text-sm text-muted-foreground">You currently have <span className="font-semibold text-foreground">{customers.length}</span> customers, <span className="font-semibold text-foreground">{invoiceInsights.total_invoices}</span> invoices and <span className="font-semibold text-foreground">{automations.filter((item) => item.is_active).length}</span> active automations.</p>
-                <p className="text-sm text-muted-foreground">Total tracked customer value is <span className="font-semibold text-foreground">{amountFormatter(report.totalCustomerValue)}</span> and inbox reply coverage is <span className="font-semibold text-foreground">{report.repliedEmails}/{emails.length}</span> emails replied.</p>
+              <CardHeader className="pb-1"><CardTitle className="text-base">Revenue Story</CardTitle></CardHeader>
+              <CardContent>
+                <ChartContainer config={revenueTrendConfig} className="h-[260px] w-full">
+                  <LineChart data={revenueTrendData} margin={{ left: 8, right: 8 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="name" tickLine={false} axisLine={false} />
+                    <YAxis tickLine={false} axisLine={false} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Line dataKey="value" stroke="var(--color-value)" strokeWidth={3} dot={{ fill: "var(--color-value)" }} />
+                  </LineChart>
+                </ChartContainer>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Total tracked customer value is <span className="font-semibold text-foreground">{amountFormatter(report.totalCustomerValue)}</span> and inbox reply coverage is <span className="font-semibold text-foreground">{report.repliedEmails}/{emails.length}</span> emails.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>
@@ -242,24 +293,11 @@ export default function Dashboard() {
           </TabsContent>
 
           <TabsContent value="invoices">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Paid Count</p><p className="text-2xl font-semibold">{report.paidInvoices.length}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Unpaid Count</p><p className="text-2xl font-semibold">{report.unpaidInvoices.length}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Overdue Count</p><p className="text-2xl font-semibold">{report.overdueInvoices.length}</p></CardContent></Card>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Paid Amount</p><p className="text-2xl font-semibold">{amountFormatter(invoiceInsights.total_paid)}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Unpaid Amount</p><p className="text-2xl font-semibold">{amountFormatter(invoiceInsights.total_unpaid)}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Overdue Amount</p><p className="text-2xl font-semibold">{amountFormatter(invoiceInsights.total_overdue)}</p></CardContent></Card>
             </div>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-sm font-medium mb-2">Upcoming Due Invoices</p>
-                <div className="space-y-2">
-                  {invoices.slice(0, 5).map((invoice) => (
-                    <div key={invoice.id} className="flex items-center justify-between rounded-md border p-2 text-sm">
-                      <span className="text-muted-foreground">{String(invoice.id).slice(0, 8)} • {String(invoice.status || "Unknown")}</span>
-                      <span className="font-medium">{formatDate(invoice.due_date)} • {amountFormatter(invoice.amount || 0)}</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           <TabsContent value="automations">
