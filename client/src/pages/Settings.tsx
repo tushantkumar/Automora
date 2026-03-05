@@ -51,13 +51,11 @@ type IntegrationState = {
 };
 
 type SystemSettingsState = {
-  smtpFrom: string;
   supportHighlightText: string;
   companyName: string;
 };
 
 const initialSystemSettings: SystemSettingsState = {
-  smtpFrom: "",
   supportHighlightText: "",
   companyName: "",
 };
@@ -132,7 +130,6 @@ export default function Settings() {
       if (!response.ok) return;
 
       setSystemSettings({
-        smtpFrom: String(data?.settings?.smtpFrom || ""),
         supportHighlightText: String(data?.settings?.supportHighlightText || ""),
         companyName: String(data?.settings?.companyName || ""),
       });
@@ -165,7 +162,6 @@ export default function Settings() {
       }
 
       setSystemSettings({
-        smtpFrom: String(data?.settings?.smtpFrom || ""),
         supportHighlightText: String(data?.settings?.supportHighlightText || ""),
         companyName: String(data?.settings?.companyName || ""),
       });
@@ -407,7 +403,7 @@ export default function Settings() {
           <Card>
             <CardHeader>
               <CardTitle>System Preferences</CardTitle>
-              <CardDescription>Configure SMTP sender and highlighted support text for automation emails.</CardDescription>
+              <CardDescription>Configure company name and highlighted support text for automation emails.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -422,17 +418,6 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">Displayed as company name in automation emails.</p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="smtp-from">SMTP From Address</Label>
-                <Input
-                  id="smtp-from"
-                  value={systemSettings.smtpFrom}
-                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, smtpFrom: event.target.value }))}
-                  placeholder="no-reply@automora.local"
-                  disabled={loadingSystemSettings || savingSystemSettings}
-                />
-                <p className="text-xs text-muted-foreground">Used as sender in automation emails. If left blank, default SMTP_FROM is used.</p>
-              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="support-highlight-text">Highlighted Support Text</Label>
@@ -523,7 +508,7 @@ export default function Settings() {
           <AlertDialogHeader>
             <AlertDialogTitle>Update system settings?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will update company name, SMTP from address, and highlighted support text for future automation emails.
+              This will update company name and highlighted support text for future automation emails.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

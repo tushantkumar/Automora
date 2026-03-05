@@ -13,11 +13,10 @@ const getAuthorizedUser = async (authHeader) => {
   return getUserBySessionToken(token);
 };
 
-const normalizeSmtpFrom = (value) => String(value || "").trim();
 const normalizeSupportHighlightText = (value) => String(value || "").trim();
 
 const toResponseSettings = ({ settingsRow, user }) => ({
-  smtpFrom: normalizeSmtpFrom(settingsRow?.smtp_from) || SMTP_FROM,
+  smtpFrom: SMTP_FROM,
   supportHighlightText: normalizeSupportHighlightText(settingsRow?.support_highlight_text) || DEFAULT_SUPPORT_HIGHLIGHT_TEXT,
   companyName: String(user?.organization_name || "").trim(),
 });
@@ -34,13 +33,12 @@ export const updateSystemSettingsForUser = async (authHeader, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
 
-  const smtpFrom = normalizeSmtpFrom(payload?.smtpFrom);
   const supportHighlightText = normalizeSupportHighlightText(payload?.supportHighlightText);
   const companyName = String(payload?.companyName || "").trim();
 
   const saved = await upsertSystemSettingsByUserId({
     userId: user.id,
-    smtpFrom,
+    smtpFrom: null,
     supportHighlightText,
   });
 
