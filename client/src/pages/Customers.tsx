@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Plus, Mail, Phone, Pencil, Trash2, X, Download } from "lucide-react";
+import { Search, Plus, Mail, Phone, Pencil, Trash2, X, Download, Upload } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -46,6 +46,8 @@ export default function Customers() {
   const [confirmDescription, setConfirmDescription] = useState("");
   const [confirmAction, setConfirmAction] = useState<null | (() => void)>(null);
   const { toast } = useToast();
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const openConfirmDialog = (title: string, description: string, onConfirm: () => void) => {
     setConfirmTitle(title);
@@ -196,6 +198,85 @@ export default function Customers() {
       window.URL.revokeObjectURL(url);
     } catch {
       toast({ title: "Unable to download customer report", description: "Please try again." });
+    }
+  };
+
+
+
+  const downloadCustomerUploadTemplate = async () => {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/customers/upload/template`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        toast({ title: "Unable to download customer template", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || "customer-upload-template.xlsx";
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Unable to download customer template", description: "Please try again." });
+    }
+  };
+
+  const uploadCustomersExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !token) return;
+
+    setIsUploading(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+      });
+      const fileData = btoa(binary);
+
+      const response = await fetch(`${AUTH_API_URL}/customers/upload/excel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fileData }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast({ title: "Customer upload failed", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const createdCount = Number(data?.createdCount || 0);
+      const failedCount = Number(data?.failedCount || 0);
+      const firstError = Array.isArray(data?.errors) ? data.errors[0] : "";
+      toast({
+        title: "Customer upload completed",
+        description: failedCount > 0
+          ? `${createdCount} created, ${failedCount} failed. ${firstError}`
+          : `${createdCount} customers created successfully.`,
+      });
+
+      void loadCustomers();
+    } catch {
+      toast({ title: "Customer upload failed", description: "Please try again." });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -394,6 +475,9 @@ export default function Customers() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input placeholder="Search customers..." className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} />
           </div>
+          <Button variant="outline" size="sm" onClick={() => { void downloadCustomerUploadTemplate(); }}><Download className="w-4 h-4 mr-2" /> Download Upload Template</Button>
+          <input ref={uploadInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { void uploadCustomersExcel(event); }} />
+          <Button variant="outline" size="sm" disabled={isUploading} onClick={() => uploadInputRef.current?.click()}><Upload className="w-4 h-4 mr-2" /> {isUploading ? "Uploading..." : "Upload Excel"}</Button>
           <Button variant="outline" size="sm" onClick={() => { void downloadCustomersExcel(); }}>
             <Download className="w-4 h-4 mr-2" /> Export Report
           </Button>

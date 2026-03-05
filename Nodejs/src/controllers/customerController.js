@@ -5,6 +5,8 @@ import {
   updateCustomerForUser,
   getCustomerInvoicePdfForUser,
   exportCustomerInvoicesExcelForUser,
+  importCustomersExcelForUser,
+  getCustomerImportTemplateForUser,
 } from "../services/customerService.js";
 
 export const getCustomersHandler = async (req, res) => {
@@ -47,6 +49,23 @@ export const downloadCustomerInvoicePdfHandler = async (req, res) => {
   }
 
   res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${result.body.fileName}"`);
+  return res.status(200).send(result.body.buffer);
+};
+
+
+export const uploadCustomersExcelHandler = async (req, res) => {
+  const result = await importCustomersExcelForUser(req.headers.authorization, req.body || {});
+  return res.status(result.status).json(result.body);
+};
+
+export const downloadCustomerImportTemplateHandler = async (req, res) => {
+  const result = await getCustomerImportTemplateForUser(req.headers.authorization);
+  if (result.status !== 200) {
+    return res.status(result.status).json(result.body);
+  }
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${result.body.fileName}"`);
   return res.status(200).send(result.body.buffer);
 };

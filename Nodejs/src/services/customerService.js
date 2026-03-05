@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import ExcelJS from "exceljs";
 import { getUserBySessionToken } from "../db/authRepository.js";
 import {
   createCustomer,
@@ -28,6 +29,35 @@ const normalizePayload = (payload) => ({
   status: String(payload?.status || "Active").trim() || "Active",
   value: String(payload?.value || "").trim(),
 });
+
+
+const parseCustomerRowsFromExcelBuffer = async (buffer) => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+
+  const rows = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+
+    const name = String(row.getCell(1).value || "").trim();
+    const client = String(row.getCell(2).value || "").trim();
+    const contact = String(row.getCell(3).value || "").trim();
+    const email = normalizeEmail(row.getCell(4).value);
+    const statusRaw = String(row.getCell(5).value ?? "").trim();
+    const status = statusRaw || "Active";
+    const value = String(row.getCell(6).value ?? "").trim();
+
+    if (!name && !client && !contact && !email && !statusRaw && !value) return;
+
+    rows.push({ rowNumber, name, client, contact, email, status, value: value || "$0" });
+  });
+
+  return rows;
+};
+
 
 
 const toCurrency = (value) => {
@@ -418,4 +448,121 @@ export const getCustomerInvoicePdfForUser = async (authHeader, customerId) => {
   } catch {
     return { status: 502, body: { message: "Unable to generate customer invoice PDF" } };
   }
+};
+
+
+export const importCustomersExcelForUser = async (authHeader, payload = {}) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const fileData = String(payload?.fileData || "").trim();
+  if (!fileData) return { status: 400, body: { message: "fileData is required" } };
+
+  let buffer;
+  try {
+    buffer = Buffer.from(fileData, "base64");
+  } catch {
+    return { status: 400, body: { message: "Invalid fileData encoding" } };
+  }
+
+  let customerRows = [];
+  try {
+    customerRows = await parseCustomerRowsFromExcelBuffer(buffer);
+  } catch {
+    return { status: 400, body: { message: "Unable to parse uploaded Excel file" } };
+  }
+
+  if (customerRows.length === 0) {
+    return { status: 400, body: { message: "No customer rows found in uploaded file" } };
+  }
+
+  const createdCustomers = [];
+  const errors = [];
+
+  for (const row of customerRows) {
+    if (!row.name || !row.client || !row.contact || !row.email) {
+      errors.push(`Row ${row.rowNumber}: name, client, contact and email are required`);
+      continue;
+    }
+
+    try {
+      const customer = await createCustomer({
+        id: createUserId(),
+        userId: user.id,
+        name: row.name,
+        client: row.client,
+        contact: row.contact,
+        email: row.email,
+        status: row.status,
+        value: row.value,
+      });
+
+      createdCustomers.push(customer);
+      await runAutomations({
+        triggerType: "Customer",
+        subTriggerType: "Created",
+        context: { customer, user },
+      });
+    } catch {
+      errors.push(`Row ${row.rowNumber}: customer email already exists (${row.email})`);
+    }
+  }
+
+  return {
+    status: 200,
+    body: {
+      message: "Customer upload completed",
+      createdCount: createdCustomers.length,
+      failedCount: errors.length,
+      errors,
+    },
+  };
+};
+
+export const getCustomerImportTemplateForUser = async (authHeader) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Customer Upload Template");
+
+  sheet.columns = [
+    { header: "name", key: "name", width: 24 },
+    { header: "client", key: "client", width: 24 },
+    { header: "contact", key: "contact", width: 20 },
+    { header: "email", key: "email", width: 32 },
+    { header: "status", key: "status", width: 16 },
+    { header: "value", key: "value", width: 14 },
+  ];
+
+  sheet.addRow({
+    name: "John Doe",
+    client: "Acme LLC",
+    contact: "+1 212 555 0102",
+    email: "john.doe@acme.com",
+    status: "Active",
+    value: "$0",
+  });
+
+  sheet.addRow({ name: "", client: "", contact: "", email: "", status: "", value: "" });
+
+  const instructionRow = sheet.addRow({
+    name: "Instructions",
+    client: "Required",
+    contact: "Required",
+    email: "Required and unique per account",
+    status: "Optional (default: Active)",
+    value: "Optional (default: $0)",
+  });
+  instructionRow.font = { italic: true };
+  sheet.getRow(1).font = { bold: true };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return {
+    status: 200,
+    body: {
+      buffer: Buffer.from(buffer),
+      fileName: "customer-upload-template.xlsx",
+    },
+  };
 };
