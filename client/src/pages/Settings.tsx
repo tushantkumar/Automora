@@ -507,9 +507,6 @@ export default function Settings() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Update system settings?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will update company name and highlighted support text for future automation emails.
-            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={savingSystemSettings}>Cancel</AlertDialogCancel>
