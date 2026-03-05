@@ -13,6 +13,7 @@ const CRUD_MESSAGES: Record<string, string> = {
   "automation created": "New automation created successfully.",
   "automation updated": "Automation updated successfully.",
   "automation deleted": "Automation deleted successfully.",
+  "automation status updated": "Automation status updated successfully.",
   "customer created": "New customer created successfully.",
   "customer updated": "Customer updated successfully.",
   "customer deleted": "Customer deleted successfully.",
@@ -22,6 +23,7 @@ const CRUD_MESSAGES: Record<string, string> = {
   "template created": "New mail template created successfully.",
   "template updated": "Mail template updated successfully.",
   "template deleted": "Mail template deleted successfully.",
+  "system settings saved successfully.": "System settings saved successfully.",
 };
 
 const getStorage = (): Storage | null => {

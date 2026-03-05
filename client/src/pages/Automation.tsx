@@ -335,6 +335,10 @@ export default function Automation() {
   const toggleStatus = async (row: AutomationRow) => {
     try {
       await axios.patch(`${AUTH_API_URL}/automations/${row.id}/toggle`, { isActive: !row.is_active }, { headers });
+      toast({
+        title: "Automation status updated",
+        description: `Automation "${row.name}" is now ${row.is_active ? "inactive" : "active"}.`,
+      });
       await loadAutomations(page, appliedSearch);
     } catch (error) {
       toast({ title: "Toggle failed", description: (error as Error).message });
