@@ -1,8 +1,10 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bot, FileText, Receipt, TriangleAlert, TrendingUp, Users } from "lucide-react";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
 
@@ -169,35 +171,41 @@ export default function Dashboard() {
   const automationLineData = useMemo(() => toAutomationLineData(automations), [automations]);
 
   const kpis = [
-    { label: "Total Customer", value: String(customers.length) },
-    { label: "Total Invoice", value: String(invoiceInsights.total_invoices || 0) },
-    { label: "Overdue Invoice", value: String(overdueInvoiceCount) },
-    { label: "Active Automation", value: String(activeAutomationCount) },
-    { label: "Total Mail Template", value: String(templates.length) },
-    { label: "Total Revenue", value: amountFormatter(invoiceInsights.total_revenue) },
+    { label: "Total Customer", value: String(customers.length), icon: Users, iconBg: "bg-blue-500/10", iconColor: "text-blue-600" },
+    { label: "Total Invoice", value: String(invoiceInsights.total_invoices || 0), icon: Receipt, iconBg: "bg-violet-500/10", iconColor: "text-violet-600" },
+    { label: "Overdue Invoice", value: String(overdueInvoiceCount), icon: TriangleAlert, iconBg: "bg-rose-500/10", iconColor: "text-rose-600" },
+    { label: "Active Automation", value: String(activeAutomationCount), icon: Bot, iconBg: "bg-emerald-500/10", iconColor: "text-emerald-600" },
+    { label: "Total Mail Template", value: String(templates.length), icon: FileText, iconBg: "bg-cyan-500/10", iconColor: "text-cyan-600" },
+    { label: "Total Revenue", value: amountFormatter(invoiceInsights.total_revenue), icon: TrendingUp, iconBg: "bg-amber-500/10", iconColor: "text-amber-600" },
   ];
 
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Overview of customer, invoice, and automation activity.</p>
+        <div className="rounded-2xl border bg-gradient-to-r from-violet-50 via-background to-blue-50 p-6">
+          <h1 className="text-3xl font-bold text-foreground">Dashboard Overview</h1>
+          <p className="text-muted-foreground mt-1">Beautiful, real-time visibility across customers, invoices, and automations.</p>
+          <div className="mt-4"><Badge variant="secondary">Live analytics</Badge></div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
           {kpis.map((kpi) => (
-            <Card key={kpi.label}>
+            <Card key={kpi.label} className="hover:shadow-md transition-shadow">
               <CardHeader className="pb-2">
-                <CardDescription className="text-xs uppercase tracking-wide">{kpi.label}</CardDescription>
-                <CardTitle className="text-2xl">{kpi.value}</CardTitle>
+                <div className="flex items-center justify-between gap-3">
+                  <CardDescription className="text-xs uppercase tracking-wide">{kpi.label}</CardDescription>
+                  <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${kpi.iconBg}`}>
+                    <kpi.icon className={`h-4 w-4 ${kpi.iconColor}`} />
+                  </div>
+                </div>
+                <CardTitle className="text-2xl mt-2">{kpi.value}</CardTitle>
               </CardHeader>
             </Card>
           ))}
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Recent Customer Activity</CardTitle>
               <CardDescription>Latest 5 customers by updated time.</CardDescription>
@@ -206,7 +214,7 @@ export default function Dashboard() {
               {recentCustomers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No customer activity yet.</p>
               ) : recentCustomers.map((customer) => (
-                <div key={customer.id} className="rounded-md border p-3 flex items-center justify-between">
+                <div key={customer.id} className="rounded-lg border bg-muted/30 p-3 flex items-center justify-between">
                   <div>
                     <p className="font-medium text-sm">{customer.name || customer.client || "Unknown"}</p>
                     <p className="text-xs text-muted-foreground">{customer.status || "-"}</p>
@@ -217,7 +225,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Recent Invoice Activity</CardTitle>
               <CardDescription>Latest 5 invoices by updated time.</CardDescription>
@@ -226,7 +234,7 @@ export default function Dashboard() {
               {recentInvoices.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No invoice activity yet.</p>
               ) : recentInvoices.map((invoice) => (
-                <div key={invoice.id} className="rounded-md border p-3 flex items-center justify-between">
+                <div key={invoice.id} className="rounded-lg border bg-muted/30 p-3 flex items-center justify-between">
                   <div>
                     <p className="font-medium text-sm">{invoice.invoice_number || invoice.id}</p>
                     <p className="text-xs text-muted-foreground">{invoice.status || "-"} • {invoice.client_name || "-"}</p>
@@ -239,38 +247,39 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Invoice Issued Trend</CardTitle>
               <CardDescription>Bar chart based on invoice issue date.</CardDescription>
             </CardHeader>
-            <CardContent className="h-[300px]">
+            <CardContent className="h-[320px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={invoiceBarData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Bar dataKey="invoices" fill="#7c3aed" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="invoices" fill="#7c3aed" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Automation Active vs Inactive</CardTitle>
-              <CardDescription>Line chart of active/inactive automations by update month.</CardDescription>
+              <CardDescription>Line chart for active and inactive automations.</CardDescription>
             </CardHeader>
-            <CardContent className="h-[300px]">
+            <CardContent className="h-[320px]">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={automationLineData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="active" stroke="#16a34a" strokeWidth={2} dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="inactive" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                  <Legend />
+                  <Line type="monotone" dataKey="active" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="inactive" stroke="#ef4444" strokeWidth={2.5} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
