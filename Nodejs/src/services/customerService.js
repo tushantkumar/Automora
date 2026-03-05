@@ -31,6 +31,27 @@ const normalizePayload = (payload) => ({
 });
 
 
+const getExcelCellText = (cellValue) => {
+  if (cellValue === null || cellValue === undefined) return "";
+  if (typeof cellValue === "string" || typeof cellValue === "number" || typeof cellValue === "boolean") {
+    return String(cellValue).trim();
+  }
+  if (cellValue instanceof Date && !Number.isNaN(cellValue.getTime())) {
+    return cellValue.toISOString().slice(0, 10);
+  }
+  if (Array.isArray(cellValue?.richText)) {
+    return cellValue.richText.map((part) => String(part?.text || "")).join("").trim();
+  }
+  if (typeof cellValue?.text === "string") return cellValue.text.trim();
+  if (typeof cellValue?.result === "string" || typeof cellValue?.result === "number") {
+    return String(cellValue.result).trim();
+  }
+  if (typeof cellValue?.hyperlink === "string") {
+    return String(cellValue?.text || cellValue.hyperlink).trim();
+  }
+  return String(cellValue).trim();
+};
+
 const parseCustomerRowsFromExcelBuffer = async (buffer) => {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
@@ -42,13 +63,13 @@ const parseCustomerRowsFromExcelBuffer = async (buffer) => {
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return;
 
-    const name = String(row.getCell(1).value || "").trim();
-    const client = String(row.getCell(2).value || "").trim();
-    const contact = String(row.getCell(3).value || "").trim();
-    const email = normalizeEmail(row.getCell(4).value);
-    const statusRaw = String(row.getCell(5).value ?? "").trim();
+    const name = getExcelCellText(row.getCell(1).value);
+    const client = getExcelCellText(row.getCell(2).value);
+    const contact = getExcelCellText(row.getCell(3).value);
+    const email = normalizeEmail(getExcelCellText(row.getCell(4).value));
+    const statusRaw = getExcelCellText(row.getCell(5).value);
     const status = statusRaw || "Active";
-    const value = String(row.getCell(6).value ?? "").trim();
+    const value = getExcelCellText(row.getCell(6).value);
 
     if (!name && !client && !contact && !email && !statusRaw && !value) return;
 
