@@ -40,7 +40,6 @@ const AUTH_API_ORIGIN = (() => {
 type ProfileState = {
   name: string;
   email: string;
-  company: string;
   status: string;
   platformTier: string;
   subscriptionPlan: string;
@@ -54,17 +53,18 @@ type IntegrationState = {
 type SystemSettingsState = {
   smtpFrom: string;
   supportHighlightText: string;
+  companyName: string;
 };
 
 const initialSystemSettings: SystemSettingsState = {
   smtpFrom: "",
   supportHighlightText: "",
+  companyName: "",
 };
 
 const initialProfile: ProfileState = {
   name: "",
   email: "",
-  company: "",
   status: "Active",
   platformTier: "free",
   subscriptionPlan: "Starter",
@@ -132,6 +132,7 @@ export default function Settings() {
       setSystemSettings({
         smtpFrom: String(data?.settings?.smtpFrom || ""),
         supportHighlightText: String(data?.settings?.supportHighlightText || ""),
+        companyName: String(data?.settings?.companyName || ""),
       });
     } catch {
       // best effort
@@ -164,6 +165,7 @@ export default function Settings() {
       setSystemSettings({
         smtpFrom: String(data?.settings?.smtpFrom || ""),
         supportHighlightText: String(data?.settings?.supportHighlightText || ""),
+        companyName: String(data?.settings?.companyName || ""),
       });
       toast({ title: "System settings saved successfully." });
     } catch {
@@ -203,11 +205,6 @@ export default function Settings() {
         setProfile({
           name: String(meData?.user?.name || ""),
           email: String(meData?.user?.email || ""),
-          company: String(
-            onboardingData?.details?.organization_name
-              || meData?.user?.organizationName
-              || "",
-          ),
           status: String(meData?.user?.status || "Active"),
           platformTier: String(meData?.user?.platformTier || "free"),
           subscriptionPlan: String(meData?.user?.subscriptionPlan || "Starter"),
@@ -395,10 +392,6 @@ export default function Settings() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="company">Company Name</Label>
-                <Input id="company" value={profile.company} readOnly disabled={loadingProfile} />
-              </div>
-              <div className="space-y-2">
                 <Label htmlFor="status">Status</Label>
                 <Input id="status" value={profile.status} readOnly disabled={loadingProfile} />
               </div>
@@ -414,6 +407,18 @@ export default function Settings() {
               <CardDescription>Configure SMTP sender and highlighted support text for automation emails.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="company-name">Company Name</Label>
+                <Input
+                  id="company-name"
+                  value={systemSettings.companyName}
+                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, companyName: event.target.value }))}
+                  placeholder="Automora"
+                  disabled={loadingSystemSettings || savingSystemSettings}
+                />
+                <p className="text-xs text-muted-foreground">Displayed as company name in automation emails.</p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="smtp-from">SMTP From Address</Label>
                 <Input
