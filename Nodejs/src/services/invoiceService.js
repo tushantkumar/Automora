@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import ExcelJS from "exceljs";
 import { getUserBySessionToken } from "../db/authRepository.js";
 import {
   createInvoice,
@@ -12,7 +13,7 @@ import {
   getInvoiceWithCustomerByIdForAutomation,
 } from "../db/invoiceRepository.js";
 import { createUserId } from "../utils/auth.js";
-import { getCustomerById, setCustomerRevenueById } from "../db/customerRepository.js";
+import { getCustomerByEmail, getCustomerById, setCustomerRevenueById } from "../db/customerRepository.js";
 import { processInvoiceStatusChangeAutomations } from "./invoiceWorkflowAutomationService.js";
 
 const readBearerToken = (authHeader) =>
@@ -48,6 +49,77 @@ const normalizePayload = (payload) => ({
   notes: String(payload?.notes || "").trim(),
   lineItems: normalizeLineItems(payload?.lineItems),
 });
+
+const normalizeExcelDate = (value) => {
+  if (!value && value !== 0) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const utcDays = Math.floor(value - 25569);
+    const utcValue = utcDays * 86400;
+    const dateInfo = new Date(utcValue * 1000);
+    if (!Number.isNaN(dateInfo.getTime())) return dateInfo.toISOString().slice(0, 10);
+  }
+
+  const parsed = new Date(String(value).trim());
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+};
+
+const parseImportedLineItems = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+
+  return raw
+    .split(";")
+    .map((entry) => {
+      const [description, quantityValue, rateValue] = entry.split("|").map((part) => String(part || "").trim());
+      return {
+        description,
+        quantity: Number(quantityValue),
+        rate: Number(rateValue),
+      };
+    })
+    .filter((item) => item.description && Number.isFinite(item.quantity) && item.quantity >= 0 && Number.isFinite(item.rate) && item.rate >= 0);
+};
+
+const parseInvoiceRowsFromExcelBuffer = async (buffer) => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+
+  const rows = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const invoiceNumber = String(row.getCell(1).value || "").trim();
+    const customerEmail = String(row.getCell(2).value || "").trim();
+    const issueDate = normalizeExcelDate(row.getCell(3).value);
+    const dueDate = normalizeExcelDate(row.getCell(4).value);
+    const statusRaw = String(row.getCell(5).value ?? "").trim();
+    const status = statusRaw || "Unpaid";
+    const taxRateRaw = String(row.getCell(6).value ?? "").trim();
+    const taxRate = taxRateRaw ? Number(taxRateRaw) : 0;
+    const notes = String(row.getCell(7).value || "").trim();
+    const rawLineItems = String(row.getCell(8).value || "").trim();
+
+    if (!invoiceNumber && !customerEmail && !issueDate && !dueDate && !statusRaw && !taxRateRaw && !notes && !rawLineItems) return;
+
+    rows.push({
+      rowNumber,
+      invoiceNumber,
+      customerEmail,
+      issueDate,
+      dueDate,
+      status,
+      taxRate,
+      notes,
+      lineItems: parseImportedLineItems(rawLineItems),
+    });
+  });
+
+  return rows;
+};
 
 
 
@@ -366,4 +438,154 @@ export const exportInvoicesExcelForUser = async (authHeader, query = {}) => {
   } catch {
     return { status: 502, body: { message: "Unable to generate invoices Excel" } };
   }
+};
+
+export const importInvoicesExcelForUser = async (authHeader, payload = {}) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const fileData = String(payload?.fileData || "").trim();
+  if (!fileData) return { status: 400, body: { message: "fileData is required" } };
+
+  let buffer;
+  try {
+    buffer = Buffer.from(fileData, "base64");
+  } catch {
+    return { status: 400, body: { message: "Invalid fileData encoding" } };
+  }
+
+  let invoiceRows = [];
+  try {
+    invoiceRows = await parseInvoiceRowsFromExcelBuffer(buffer);
+  } catch {
+    return { status: 400, body: { message: "Unable to parse uploaded Excel file" } };
+  }
+
+  if (invoiceRows.length === 0) {
+    return { status: 400, body: { message: "No invoice rows found in uploaded file" } };
+  }
+
+  const createdInvoices = [];
+  const errors = [];
+  const touchedCustomerIds = new Set();
+
+  for (const row of invoiceRows) {
+    if (!row.invoiceNumber || !row.customerEmail || !row.issueDate || !row.dueDate || row.lineItems.length === 0 || !Number.isFinite(row.taxRate) || row.taxRate < 0) {
+      errors.push(`Row ${row.rowNumber}: required fields are missing or invalid`);
+      continue;
+    }
+
+    const customer = await getCustomerByEmail({ userId: user.id, email: row.customerEmail });
+    if (!customer) {
+      errors.push(`Row ${row.rowNumber}: customer email not found (${row.customerEmail})`);
+      continue;
+    }
+
+    try {
+      const subtotal = row.lineItems.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.rate || 0)), 0);
+      const computedAmount = Number((subtotal + (subtotal * row.taxRate) / 100).toFixed(2));
+
+      const invoice = await createInvoice({
+        id: createUserId(),
+        userId: user.id,
+        customerId: customer.id,
+        invoiceNumber: row.invoiceNumber,
+        clientName: customer.client,
+        issueDate: row.issueDate,
+        dueDate: row.dueDate,
+        amount: computedAmount,
+        taxRate: row.taxRate,
+        status: row.status,
+        notes: row.notes,
+        lineItems: row.lineItems,
+      });
+
+      createdInvoices.push(invoice);
+      touchedCustomerIds.add(customer.id);
+      await processInvoiceStatusChangeAutomations({ user, previousInvoice: null, invoice, customer });
+    } catch {
+      errors.push(`Row ${row.rowNumber}: invoice number already exists (${row.invoiceNumber})`);
+    }
+  }
+
+  for (const customerId of touchedCustomerIds) {
+    await syncCustomerRevenueById({ userId: user.id, customerId });
+  }
+
+  return {
+    status: 200,
+    body: {
+      message: "Invoice upload completed",
+      createdCount: createdInvoices.length,
+      failedCount: errors.length,
+      errors,
+    },
+  };
+};
+
+
+export const getInvoiceImportTemplateForUser = async (authHeader) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Invoice Upload Template");
+
+  sheet.columns = [
+    { header: "invoice_number", key: "invoice_number", width: 20 },
+    { header: "customer_email", key: "customer_email", width: 30 },
+    { header: "issue_date", key: "issue_date", width: 15 },
+    { header: "due_date", key: "due_date", width: 15 },
+    { header: "status", key: "status", width: 14 },
+    { header: "tax_rate", key: "tax_rate", width: 12 },
+    { header: "notes", key: "notes", width: 36 },
+    { header: "line_items", key: "line_items", width: 56 },
+  ];
+
+  sheet.addRow({
+    invoice_number: "INV-1001",
+    customer_email: "customer@example.com",
+    issue_date: "2026-01-10",
+    due_date: "2026-01-24",
+    status: "Unpaid",
+    tax_rate: 10,
+    notes: "Onboarding invoice",
+    line_items: "Consultation|1|1000;Implementation|1|500",
+  });
+
+  sheet.addRow({
+    invoice_number: "",
+    customer_email: "",
+    issue_date: "",
+    due_date: "",
+    status: "",
+    tax_rate: "",
+    notes: "",
+    line_items: "",
+  });
+
+  const noteRow = sheet.addRow({
+    invoice_number: "Instructions",
+    customer_email: "customer_email must already exist in customers",
+    issue_date: "Use YYYY-MM-DD",
+    due_date: "Use YYYY-MM-DD",
+    status: "Unpaid/Pending/Paid/Overdue",
+    tax_rate: "Number (amount is auto-calculated from line_items + tax_rate)",
+    notes: "Optional",
+    line_items: "Format: Description|Qty|Rate;Description|Qty|Rate",
+  });
+  noteRow.font = { italic: true };
+
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+
+  return {
+    status: 200,
+    body: {
+      buffer: Buffer.from(buffer),
+      fileName: "invoice-upload-template.xlsx",
+    },
+  };
 };

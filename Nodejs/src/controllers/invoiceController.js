@@ -6,6 +6,8 @@ import {
   updateInvoiceForUser,
   getInvoicePdfForUser,
   exportInvoicesExcelForUser,
+  importInvoicesExcelForUser,
+  getInvoiceImportTemplateForUser,
 } from "../services/invoiceService.js";
 
 export const getInvoicesHandler = async (req, res) => {
@@ -51,6 +53,22 @@ export const downloadInvoicePdfHandler = async (req, res) => {
   }
 
   res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${result.body.fileName}"`);
+  return res.status(200).send(result.body.buffer);
+};
+
+export const uploadInvoicesExcelHandler = async (req, res) => {
+  const result = await importInvoicesExcelForUser(req.headers.authorization, req.body || {});
+  return res.status(result.status).json(result.body);
+};
+
+export const downloadInvoiceImportTemplateHandler = async (req, res) => {
+  const result = await getInvoiceImportTemplateForUser(req.headers.authorization);
+  if (result.status !== 200) {
+    return res.status(result.status).json(result.body);
+  }
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${result.body.fileName}"`);
   return res.status(200).send(result.body.buffer);
 };
