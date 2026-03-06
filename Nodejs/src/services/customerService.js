@@ -11,6 +11,7 @@ import {
 import { createUserId, normalizeEmail } from "../utils/auth.js";
 import { countInvoicesByCustomerId, listInvoicesByCustomerId } from "../db/invoiceRepository.js";
 import { runAutomations } from "./automation/executionEngine.js";
+import { canCreateResources, canDeleteResources, canUpdateResources, canUploadResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -18,7 +19,9 @@ const readBearerToken = (authHeader) =>
 const getAuthorizedUser = async (authHeader) => {
   const token = readBearerToken(authHeader);
   if (!token) return null;
-  return getUserBySessionToken(token);
+  const user = await getUserBySessionToken(token);
+  if (!user) return null;
+  return { ...user, actor_user_id: user.id, id: user.workspace_id || user.id };
 };
 
 const normalizePayload = (payload) => ({
@@ -324,6 +327,8 @@ export const getCustomersForUser = async (authHeader) => {
 export const createCustomerForUser = async (authHeader, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canCreateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
   if (!data.name || !data.client || !data.contact || !data.email) {
@@ -354,6 +359,8 @@ export const createCustomerForUser = async (authHeader, payload) => {
 export const updateCustomerForUser = async (authHeader, customerId, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canUpdateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
   if (!data.name || !data.client || !data.contact || !data.email) {
@@ -380,6 +387,7 @@ export const updateCustomerForUser = async (authHeader, customerId, payload) => 
 export const deleteCustomerForUser = async (authHeader, customerId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canDeleteResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const invoiceCount = await countInvoicesByCustomerId({ userId: user.id, customerId });
   if (invoiceCount > 0) {
@@ -475,6 +483,7 @@ export const getCustomerInvoicePdfForUser = async (authHeader, customerId) => {
 export const importCustomersExcelForUser = async (authHeader, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canUploadResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const fileData = String(payload?.fileData || "").trim();
   if (!fileData) return { status: 400, body: { message: "fileData is required" } };

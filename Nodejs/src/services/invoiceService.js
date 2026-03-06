@@ -16,6 +16,7 @@ import { createUserId } from "../utils/auth.js";
 import { getCustomerByEmail, getCustomerById, setCustomerRevenueById } from "../db/customerRepository.js";
 import { processInvoiceStatusChangeAutomations } from "./invoiceWorkflowAutomationService.js";
 import { sendGmailEmail } from "./emailIntegrationService.js";
+import { canCreateResources, canDeleteResources, canSendMail, canUpdateResources, canUploadResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -23,7 +24,9 @@ const readBearerToken = (authHeader) =>
 const getAuthorizedUser = async (authHeader) => {
   const token = readBearerToken(authHeader);
   if (!token) return null;
-  return getUserBySessionToken(token);
+  const user = await getUserBySessionToken(token);
+  if (!user) return null;
+  return { ...user, actor_user_id: user.id, id: user.workspace_id || user.id };
 };
 
 const normalizeLineItems = (lineItems) => {
@@ -338,6 +341,8 @@ export const getInvoiceInsightsForUser = async (authHeader) => {
 export const createInvoiceForUser = async (authHeader, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canCreateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
 
@@ -368,6 +373,8 @@ export const createInvoiceForUser = async (authHeader, payload) => {
 export const updateInvoiceForUser = async (authHeader, invoiceId, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canUpdateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
 
@@ -398,6 +405,7 @@ export const updateInvoiceForUser = async (authHeader, invoiceId, payload) => {
 export const deleteInvoiceForUser = async (authHeader, invoiceId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canDeleteResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const existingInvoice = await getInvoiceById({ invoiceId, userId: user.id });
   if (!existingInvoice) return { status: 404, body: { message: "invoice not found" } };
@@ -471,6 +479,7 @@ export const exportInvoicesExcelForUser = async (authHeader, query = {}) => {
 export const importInvoicesExcelForUser = async (authHeader, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canUploadResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const fileData = String(payload?.fileData || "").trim();
   if (!fileData) return { status: 400, body: { message: "fileData is required" } };
@@ -622,6 +631,8 @@ export const getInvoiceImportTemplateForUser = async (authHeader) => {
 export const sendInvoiceEmailForUser = async (authHeader, invoiceId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canSendMail(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const targetInvoiceId = String(invoiceId || "").trim();
   if (!targetInvoiceId) return { status: 400, body: { message: "invoice id is required" } };

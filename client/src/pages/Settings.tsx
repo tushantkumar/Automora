@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,18 +25,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { User, Shield, Zap, Mail, Trash2, CreditCard, Server } from "lucide-react";
+import { User, Shield, Zap, Mail, Trash2, CreditCard, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
-
-const AUTH_API_ORIGIN = (() => {
-  try {
-    return new URL(AUTH_API_URL).origin;
-  } catch {
-    return "";
-  }
-})();
 
 type ProfileState = {
   name: string;
@@ -43,6 +36,8 @@ type ProfileState = {
   status: string;
   platformTier: string;
   subscriptionPlan: string;
+  role: string;
+  companyName: string;
 };
 
 type IntegrationState = {
@@ -50,14 +45,15 @@ type IntegrationState = {
   connectedEmail: string | null;
 };
 
-type SystemSettingsState = {
-  supportHighlightText: string;
-  companyName: string;
-};
-
-const initialSystemSettings: SystemSettingsState = {
-  supportHighlightText: "",
-  companyName: "",
+type ManagedUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  invitedDate: string;
+  isDisabled?: boolean;
+  invitationState?: string;
 };
 
 const initialProfile: ProfileState = {
@@ -66,6 +62,8 @@ const initialProfile: ProfileState = {
   status: "Active",
   platformTier: "free",
   subscriptionPlan: "Starter",
+  role: "Viewer",
+  companyName: "",
 };
 
 export default function Settings() {
@@ -84,11 +82,17 @@ export default function Settings() {
   const [sendingDeleteOtp, setSendingDeleteOtp] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteOtp, setDeleteOtp] = useState("");
-  const [systemSettings, setSystemSettings] = useState<SystemSettingsState>(initialSystemSettings);
-  const [loadingSystemSettings, setLoadingSystemSettings] = useState(true);
-  const [savingSystemSettings, setSavingSystemSettings] = useState(false);
-  const [confirmSystemUpdateOpen, setConfirmSystemUpdateOpen] = useState(false);
-  const [systemUpdatedPopupOpen, setSystemUpdatedPopupOpen] = useState(false);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
+  const [deleteTargetUser, setDeleteTargetUser] = useState<ManagedUser | null>(null);
+  const [deletingManagedUser, setDeletingManagedUser] = useState(false);
+  const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
+  const [deactivateTargetUser, setDeactivateTargetUser] = useState<ManagedUser | null>(null);
+  const [deactivatingManagedUser, setDeactivatingManagedUser] = useState(false);
+  const [loadingManagedUsers, setLoadingManagedUsers] = useState(false);
+  const [invitingUser, setInvitingUser] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "Viewer" });
+  const [userFilter, setUserFilter] = useState({ name: "", email: "", role: "all" });
   const { toast } = useToast();
 
   const loadIntegrations = async () => {
@@ -116,124 +120,76 @@ export default function Settings() {
     }
   };
 
-  const loadSystemSettings = async () => {
+  const loadProfile = async () => {
     if (!token) {
-      setLoadingSystemSettings(false);
+      setLoadingProfile(false);
+      toast({ title: "You are not logged in." });
       return;
     }
 
     try {
-      const response = await fetch(`${AUTH_API_URL}/system-settings`, {
+      const meResponse = await fetch(`${AUTH_API_URL}/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const meData = await meResponse.json();
+
+      if (!meResponse.ok) {
+        toast({ title: "Unable to load profile details.", description: meData?.message || "Please try again." });
+        setLoadingProfile(false);
+        return;
+      }
+
+      setProfile({
+        name: String(meData?.user?.name || ""),
+        email: String(meData?.user?.email || ""),
+        status: String(meData?.user?.status || "Active"),
+        platformTier: String(meData?.user?.platformTier || "free"),
+        subscriptionPlan: String(meData?.user?.subscriptionPlan || "Starter"),
+        role: String(meData?.user?.role || "Viewer"),
+        companyName: String(meData?.user?.organizationName || ""),
+      });
+    } catch {
+      toast({ title: "Unable to load profile details.", description: "Please try again." });
+    } finally {
+      setLoadingProfile(false);
+    }
+  };
+
+  const loadManagedUsers = async () => {
+    if (!token || profile.role !== "Admin") {
+      setManagedUsers([]);
+      return;
+    }
+
+    setLoadingManagedUsers(true);
+    try {
+      const response = await fetch(`${AUTH_API_URL}/admin/users`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
-      if (!response.ok) return;
-
-      setSystemSettings({
-        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
-        companyName: String(data?.settings?.companyName || ""),
-      });
-    } catch {
-      // best effort
-    } finally {
-      setLoadingSystemSettings(false);
-    }
-  };
-
-  const saveSystemSettings = async () => {
-    if (!token) return;
-
-    setSavingSystemSettings(true);
-
-    try {
-      const response = await fetch(`${AUTH_API_URL}/system-settings`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(systemSettings),
-      });
-      const data = await response.json();
-
       if (!response.ok) {
-        toast({ title: "⚙️ Settings", description: data?.message || "Unable to save system settings. Please try again." });
+        toast({ title: "Unable to load users", description: data?.message || "Please try again." });
         return;
       }
-
-      setSystemSettings({
-        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
-        companyName: String(data?.settings?.companyName || ""),
-      });
-      toast({ title: "⚙️ Settings", description: "System settings saved successfully." });
-      setSystemUpdatedPopupOpen(true);
+      setManagedUsers(Array.isArray(data?.users) ? data.users : []);
     } catch {
-      toast({ title: "⚙️ Settings", description: "Unable to save system settings. Please try again." });
+      toast({ title: "Unable to load users", description: "Please try again." });
     } finally {
-      setSavingSystemSettings(false);
+      setLoadingManagedUsers(false);
     }
   };
 
   useEffect(() => {
-    const loadProfile = async () => {
-      if (!token) {
-        setLoadingProfile(false);
-        toast({ title: "You are not logged in." });
-        return;
-      }
-
-      try {
-        const [meResponse, onboardingResponse] = await Promise.all([
-          fetch(`${AUTH_API_URL}/me`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch(`${AUTH_API_URL}/onboarding`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
-
-        const meData = await meResponse.json();
-        const onboardingData = onboardingResponse.ok ? await onboardingResponse.json() : null;
-
-        if (!meResponse.ok) {
-          toast({ title: "Unable to load profile details.", description: meData?.message || "Please try again." });
-          setLoadingProfile(false);
-          return;
-        }
-
-        setProfile({
-          name: String(meData?.user?.name || ""),
-          email: String(meData?.user?.email || ""),
-          status: String(meData?.user?.status || "Active"),
-          platformTier: String(meData?.user?.platformTier || "free"),
-          subscriptionPlan: String(meData?.user?.subscriptionPlan || "Starter"),
-        });
-      } catch {
-        toast({ title: "Unable to load profile details.", description: "Please try again." });
-      } finally {
-        setLoadingProfile(false);
-      }
-    };
-
     void loadProfile();
     void loadIntegrations();
-    void loadSystemSettings();
   }, [token]);
 
   useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      const allowedOrigins = [window.location.origin, AUTH_API_ORIGIN].filter(Boolean);
-      if (!allowedOrigins.includes(event.origin)) return;
-
-      if (event?.data?.type === "gmail_connected") {
-        toast({ title: "Gmail connected successfully. Emails will be available in Inbox." });
-        void loadIntegrations();
-      }
-    };
-
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [token]);
+    if (profile.role === "Admin") {
+      void loadManagedUsers();
+    }
+  }, [profile.role, token]);
 
   const connectGmail = async () => {
     if (!token) return;
@@ -358,6 +314,200 @@ export default function Settings() {
     }
   };
 
+  const inviteUser = async () => {
+    if (!token) return;
+    const payload = {
+      name: inviteForm.name.trim(),
+      email: inviteForm.email.trim(),
+      role: inviteForm.role,
+    };
+    if (!payload.name || !payload.email || !payload.role) {
+      toast({ title: "Name, email and role are required." });
+      return;
+    }
+
+    setInvitingUser(true);
+    try {
+      const response = await fetch(`${AUTH_API_URL}/admin/users/invite`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast({
+          title: "Invite could not be sent",
+          description: data?.message || `We couldn't send an invitation to ${payload.email}. Please try again.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Invitation sent",
+        description: `An invite email has been sent to ${payload.email} with a 24-hour activation link.`,
+      });
+      setInviteForm({ name: "", email: "", role: "Viewer" });
+      void loadManagedUsers();
+    } catch {
+      toast({
+        title: "Invite could not be sent",
+        description: `We couldn't send an invitation to ${payload.email}. Please try again.`,
+        variant: "destructive",
+      });
+    } finally {
+      setInvitingUser(false);
+    }
+  };
+
+  const resendInvite = async (email: string) => {
+    if (!token) return;
+    try {
+      const response = await fetch(`${AUTH_API_URL}/admin/users/${encodeURIComponent(email)}/resend-invite`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast({ title: "Unable to resend invite", description: data?.message || "Please try again." });
+        return;
+      }
+      toast({ title: "Invite resent." });
+      void loadManagedUsers();
+    } catch {
+      toast({ title: "Unable to resend invite", description: "Please try again." });
+    }
+  };
+
+  const changeUserRole = async (userId: string, role: string) => {
+    if (!token) return;
+    try {
+      const response = await fetch(`${AUTH_API_URL}/admin/users/${userId}/role`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ role }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast({ title: "Unable to change role", description: data?.message || "Please try again." });
+        return;
+      }
+      void loadManagedUsers();
+    } catch {
+      toast({ title: "Unable to change role", description: "Please try again." });
+    }
+  };
+
+  const requestDeactivateUser = (user: ManagedUser) => {
+    setDeactivateTargetUser(user);
+    setDeactivateDialogOpen(true);
+  };
+
+  const disableUser = async (userId: string, disabled: boolean) => {
+    if (!token) return;
+
+    if (disabled) {
+      setDeactivatingManagedUser(true);
+    }
+
+    try {
+      const response = await fetch(`${AUTH_API_URL}/admin/users/${userId}/disable`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ disabled }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast({
+          title: disabled ? "Deactivation failed" : "User enable failed",
+          description: data?.message || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (disabled) {
+        toast({
+          title: "User deactivated",
+          description: `${deactivateTargetUser?.name || "Selected user"} has been deactivated and can no longer access the workspace.`,
+        });
+        setDeactivateDialogOpen(false);
+        setDeactivateTargetUser(null);
+      }
+
+      void loadManagedUsers();
+    } catch {
+      toast({
+        title: disabled ? "Deactivation failed" : "User enable failed",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      if (disabled) {
+        setDeactivatingManagedUser(false);
+      }
+    }
+  };
+
+
+
+
+  const requestDeleteUser = (user: ManagedUser) => {
+    setDeleteTargetUser(user);
+    setDeleteUserDialogOpen(true);
+  };
+
+  const deleteUser = async () => {
+    if (!token || !deleteTargetUser) return;
+
+    setDeletingManagedUser(true);
+    try {
+      const response = await fetch(`${AUTH_API_URL}/admin/users/${deleteTargetUser.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast({
+          title: "User deletion failed",
+          description: data?.message || `We couldn't delete ${deleteTargetUser.email}. Please try again.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "User deleted",
+        description: `${deleteTargetUser.name} (${deleteTargetUser.email}) has been permanently removed from this workspace.`,
+      });
+      setDeleteUserDialogOpen(false);
+      setDeleteTargetUser(null);
+      void loadManagedUsers();
+    } catch {
+      toast({
+        title: "User deletion failed",
+        description: deleteTargetUser ? `We couldn't delete ${deleteTargetUser.email}. Please try again.` : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingManagedUser(false);
+    }
+  };
+
+
+  const filteredManagedUsers = useMemo(() => managedUsers.filter((user) => {
+    const nameOk = userFilter.name.trim() ? user.name.toLowerCase().includes(userFilter.name.trim().toLowerCase()) : true;
+    const emailOk = userFilter.email.trim() ? user.email.toLowerCase().includes(userFilter.email.trim().toLowerCase()) : true;
+    const roleOk = userFilter.role === "all" ? true : user.role === userFilter.role;
+    return nameOk && emailOk && roleOk;
+  }), [managedUsers, userFilter]);
   return (
     <AppLayout>
       <div className="mb-8">
@@ -368,9 +518,9 @@ export default function Settings() {
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="bg-muted/50 p-1">
           <TabsTrigger value="profile" className="gap-2"><User className="w-4 h-4" /> Profile</TabsTrigger>
-          <TabsTrigger value="system" className="gap-2"><Server className="w-4 h-4" /> System</TabsTrigger>
           <TabsTrigger value="security" className="gap-2"><Shield className="w-4 h-4" /> Security</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-2"><Zap className="w-4 h-4" /> Integrations</TabsTrigger>
+          <TabsTrigger value="user-management" className="gap-2"><Users className="w-4 h-4" /> User Management</TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile" className="space-y-6">
@@ -391,49 +541,17 @@ export default function Settings() {
                 </div>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="company-name">Company Name</Label>
+                <Input id="company-name" value={profile.companyName || "-"} readOnly disabled />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="role">Role</Label>
+                <Input id="role" value={profile.role} readOnly disabled />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="status">Status</Label>
                 <Input id="status" value={profile.status} readOnly disabled={loadingProfile} />
               </div>
-              <Button disabled>Save Changes</Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="system" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>System Preferences</CardTitle>
-              <CardDescription>Configure system preferences for automation emails.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="company-name">Company Name</Label>
-                <Input
-                  id="company-name"
-                  value={systemSettings.companyName}
-                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, companyName: event.target.value }))}
-                  placeholder="Automora"
-                  disabled={loadingSystemSettings || savingSystemSettings}
-                />
-                <p className="text-xs text-muted-foreground">Displayed as company name in automation emails.</p>
-              </div>
-
-
-              <div className="space-y-2">
-                <Label htmlFor="support-highlight-text">Mail Address</Label>
-                <Input
-                  id="support-highlight-text"
-                  value={systemSettings.supportHighlightText}
-                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, supportHighlightText: event.target.value }))}
-                  placeholder="support@automora.local"
-                  disabled={loadingSystemSettings || savingSystemSettings}
-                />
-                <p className="text-xs text-muted-foreground">Shown mail address in automation emails. If left blank, default text is used.</p>
-              </div>
-
-              <Button onClick={() => setConfirmSystemUpdateOpen(true)} disabled={loadingSystemSettings || savingSystemSettings}>
-                {savingSystemSettings ? "Saving..." : "Save System Settings"}
-              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -464,12 +582,20 @@ export default function Settings() {
           <Card className="border-destructive/20 bg-destructive/5">
             <CardHeader>
               <CardTitle className="text-destructive">Danger Zone</CardTitle>
-              <CardDescription>Delete account requires OTP verification sent to your registered email.</CardDescription>
+              <CardDescription>
+                {profile.role === "Admin"
+                  ? "Delete account requires OTP verification sent to your registered email."
+                  : "Only workspace admin can delete accounts."}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button variant="destructive" className="gap-2" onClick={() => setConfirmDeleteOpen(true)}>
-                <Trash2 className="w-4 h-4" /> Delete Account
-              </Button>
+              {profile.role === "Admin" ? (
+                <Button variant="destructive" className="gap-2" onClick={() => setConfirmDeleteOpen(true)}>
+                  <Trash2 className="w-4 h-4" /> Delete Account
+                </Button>
+              ) : (
+                <p className="text-sm text-muted-foreground">Please contact your admin for account deletion.</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -501,42 +627,177 @@ export default function Settings() {
             />
           </div>
         </TabsContent>
+
+        <TabsContent value="user-management" className="space-y-6">
+          {profile.role !== "Admin" ? (
+            <Card>
+              <CardContent className="pt-6 text-sm text-muted-foreground">You don't have access to user management.</CardContent>
+            </Card>
+          ) : (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Invite User</CardTitle>
+                  <CardDescription>Send an account activation link that expires in 24 hours.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <Input placeholder="Name" value={inviteForm.name} onChange={(event) => setInviteForm((prev) => ({ ...prev, name: event.target.value }))} />
+                  <Input placeholder="Email" type="email" value={inviteForm.email} onChange={(event) => setInviteForm((prev) => ({ ...prev, email: event.target.value }))} />
+                  <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={inviteForm.role} onChange={(event) => setInviteForm((prev) => ({ ...prev, role: event.target.value }))}>
+                    <option value="Viewer">Viewer</option>
+                    <option value="Editor">Editor</option>
+                    <option value="Author">Author</option>
+                  </select>
+                  <Button onClick={() => { void inviteUser(); }} disabled={invitingUser}>{invitingUser ? "Sending..." : "Send Invite"}</Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Users</CardTitle>
+                  <CardDescription>Name, email, role, status, invited date and actions.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input placeholder="Filter by name" value={userFilter.name} onChange={(event) => setUserFilter((prev) => ({ ...prev, name: event.target.value }))} />
+                    <Input placeholder="Filter by email" value={userFilter.email} onChange={(event) => setUserFilter((prev) => ({ ...prev, email: event.target.value }))} />
+                    <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userFilter.role} onChange={(event) => setUserFilter((prev) => ({ ...prev, role: event.target.value }))}>
+                      <option value="all">All Roles</option>
+                      <option value="Viewer">Viewer</option>
+                      <option value="Editor">Editor</option>
+                      <option value="Author">Author</option>
+                      <option value="Admin">Admin</option>
+                    </select>
+                  </div>
+
+                  {loadingManagedUsers ? (
+                    <p className="text-sm text-muted-foreground">Loading users...</p>
+                  ) : filteredManagedUsers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No users found for selected filters.</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Invited Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredManagedUsers.map((user) => (
+                          <TableRow key={`${user.id}-${user.email}`}>
+                            <TableCell>{user.name}</TableCell>
+                            <TableCell>{user.email}</TableCell>
+                            <TableCell>
+                              {user.status !== "Pending" && user.status !== "Expired" && user.role !== "Admin" ? (
+                                <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={user.role} onChange={(event) => { void changeUserRole(user.id, event.target.value); }}>
+                                  <option value="Viewer">Viewer</option>
+                                  <option value="Editor">Editor</option>
+                                  <option value="Author">Author</option>
+                                </select>
+                              ) : user.role}
+                            </TableCell>
+                            <TableCell>{user.status}</TableCell>
+                            <TableCell>{new Date(user.invitedDate).toLocaleString()}</TableCell>
+                            <TableCell className="text-right">
+                              {user.status === "Pending" || user.status === "Expired" ? (
+                                <Button variant="outline" size="sm" onClick={() => { void resendInvite(user.email); }}>Resend Invite</Button>
+                              ) : user.role === "Admin" ? (
+                                <span className="text-xs text-muted-foreground">Workspace Admin</span>
+                              ) : (
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    variant={user.isDisabled ? "default" : "destructive"}
+                                    size="sm"
+                                    onClick={() => {
+                                      if (user.isDisabled) {
+                                        void disableUser(user.id, false);
+                                        return;
+                                      }
+                                      requestDeactivateUser(user);
+                                    }}
+                                  >
+                                    {user.isDisabled ? "Enable User" : "Deactivate"}
+                                  </Button>
+                                  <Button variant="destructive" size="sm" onClick={() => requestDeleteUser(user)}>Delete</Button>
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </TabsContent>
       </Tabs>
 
-      <AlertDialog open={confirmSystemUpdateOpen} onOpenChange={setConfirmSystemUpdateOpen}>
+      <AlertDialog
+        open={deactivateDialogOpen}
+        onOpenChange={(open) => {
+          setDeactivateDialogOpen(open);
+          if (!open && !deactivatingManagedUser) setDeactivateTargetUser(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Update system settings?</AlertDialogTitle>
+            <AlertDialogTitle>Deactivate user account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`This will immediately block ${deactivateTargetUser?.name || "this user"} (${deactivateTargetUser?.email || ""}) from accessing the application until re-enabled.`}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={savingSystemSettings}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deactivatingManagedUser}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={savingSystemSettings}
+              disabled={deactivatingManagedUser}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={(event) => {
                 event.preventDefault();
-                setConfirmSystemUpdateOpen(false);
-                void saveSystemSettings();
+                if (!deactivateTargetUser) return;
+                void disableUser(deactivateTargetUser.id, true);
               }}
             >
-              {savingSystemSettings ? "Updating..." : "Update Settings"}
+              {deactivatingManagedUser ? "Deactivating..." : "Deactivate User"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={systemUpdatedPopupOpen} onOpenChange={setSystemUpdatedPopupOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>System settings updated</DialogTitle>
-            <DialogDescription>
-              Your changes have been saved successfully.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={() => setSystemUpdatedPopupOpen(false)}>OK</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AlertDialog
+        open={deleteUserDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteUserDialogOpen(open);
+          if (!open && !deletingManagedUser) setDeleteTargetUser(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`This will permanently delete ${deleteTargetUser?.name || "this user"} (${deleteTargetUser?.email || ""}). This action cannot be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingManagedUser}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deletingManagedUser}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(event) => {
+                event.preventDefault();
+                void deleteUser();
+              }}
+            >
+              {deletingManagedUser ? "Deleting..." : "Delete User"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>
@@ -550,7 +811,7 @@ export default function Settings() {
             <AlertDialogCancel disabled={sendingDeleteOtp}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={sendingDeleteOtp}
-              onClick={(event) => {
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
                 event.preventDefault();
                 setConfirmDeleteOpen(false);
                 void requestDeleteOtp();
@@ -621,6 +882,7 @@ function IntegrationCard({
   onSecondaryAction?: () => void;
 }) {
   const isConnected = status.startsWith("Connected");
+
 
   return (
     <Card>

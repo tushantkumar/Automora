@@ -7,11 +7,14 @@ import emailIntegrationRouter from "./routes/emailIntegrationRoutes.js";
 import mailTemplateRouter from "./routes/mailTemplateRoutes.js";
 import automationRouter from "./routes/automationRoutes.js";
 import systemSettingsRouter from "./routes/systemSettingsRoutes.js";
+import userManagementRouter from "./routes/userManagementRoutes.js";
+import { accountStatusGuard } from "./middleware/accountStatusGuard.js";
 
 const app = express();
 
 app.use(corsMiddleware);
 app.use(express.json());
+app.use(accountStatusGuard);
 app.use(authRouter);
 app.use(customerRouter);
 app.use(invoiceRouter);
@@ -19,6 +22,7 @@ app.use(emailIntegrationRouter);
 app.use(mailTemplateRouter);
 app.use(automationRouter);
 app.use(systemSettingsRouter);
+app.use(userManagementRouter);
 
 // centralized error handler
 app.use((error, _req, res, _next) => {
