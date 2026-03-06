@@ -23,6 +23,9 @@ export const initDatabase = async () => {
       password_hash TEXT NOT NULL,
       is_verified BOOLEAN NOT NULL DEFAULT FALSE,
       status TEXT NOT NULL DEFAULT 'Active',
+      trial_started_at TIMESTAMPTZ,
+      trial_ends_at TIMESTAMPTZ,
+      plan_selected_explicitly BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
@@ -65,6 +68,9 @@ export const initDatabase = async () => {
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS invitation_accepted_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN NOT NULL DEFAULT FALSE;`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS workspace_id TEXT;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS trial_started_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS plan_selected_explicitly BOOLEAN NOT NULL DEFAULT FALSE;`);
   await pool.query(`UPDATE auth_users SET workspace_id = id WHERE workspace_id IS NULL;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS industry TEXT;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS business_bio TEXT;`);
@@ -339,6 +345,7 @@ export const ensureDatabaseIndexes = async () => {
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_system_settings_user_id_idx ON auth_system_settings(user_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_users_role_idx ON auth_users(role);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_users_invited_by_idx ON auth_users(invited_by);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_users_trial_ends_at_idx ON auth_users(trial_ends_at);`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS auth_user_invites_token_hash_idx ON auth_user_invites(token_hash);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_user_invites_inviter_user_id_idx ON auth_user_invites(inviter_user_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_user_invites_invited_email_idx ON auth_user_invites(invited_email);`);

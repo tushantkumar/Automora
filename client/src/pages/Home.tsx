@@ -1,8 +1,9 @@
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { ArrowRight, BadgeCheck, BarChart3, Bot, FileText, Mail, ShieldCheck, Sparkles, Users, Workflow } from "lucide-react";
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const coreFeatures = [
   {
@@ -44,7 +45,62 @@ const highlights = [
   "Deactivated account lockout with immediate access blocking",
 ];
 
+type BillingPlan = {
+  id: "starter" | "growth" | "enterprise";
+  name: string;
+  price: string;
+  cadence: string;
+  description: string;
+  features: readonly string[];
+  recommended?: boolean;
+};
+
+const billingPlans: readonly BillingPlan[] = [
+  {
+    id: "starter",
+    name: "Starter",
+    price: "$19",
+    cadence: "per workspace / month",
+    description: "For solo operators launching automation and invoices quickly.",
+    features: ["1 user seat", "Up to 1,000 automated actions", "Email + invoice basics", "Community support"],
+  },
+  {
+    id: "growth",
+    name: "Growth",
+    price: "$69",
+    cadence: "per workspace / month",
+    description: "For scaling teams that need deeper collaboration and process control.",
+    features: ["Up to 10 user seats", "Up to 20,000 automated actions", "Advanced inbox + templates", "Priority support"],
+    recommended: true,
+  },
+  {
+    id: "enterprise",
+    name: "Enterprise",
+    price: "Custom",
+    cadence: "annual contract",
+    description: "For organizations requiring custom controls, auditability, and SLA commitments.",
+    features: ["Unlimited user seats", "Unlimited automations", "Dedicated success manager", "Security + compliance reviews"],
+  },
+];
+
+type BillingPlanId = (typeof billingPlans)[number]["id"];
+
 export default function Home() {
+  const [, navigate] = useLocation();
+  const [selectedPlan, setSelectedPlan] = useState<BillingPlanId | null>(null);
+
+  const signupUrl = useMemo(() => (selectedPlan ? `/signup?plan=${selectedPlan}` : "/signup"), [selectedPlan]);
+
+  const continueToSignup = ({ requireExplicitSelection = false }: { requireExplicitSelection?: boolean } = {}) => {
+    if (!selectedPlan && requireExplicitSelection) {
+      document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    const destination = selectedPlan ? signupUrl : "/signup";
+    navigate(destination);
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-50 border-b border-border/60 bg-background/90 backdrop-blur">
@@ -55,11 +111,12 @@ export default function Home() {
           </div>
           <div className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
             <a href="#features" className="transition-colors hover:text-foreground">Features</a>
+            <a href="#pricing" className="transition-colors hover:text-foreground">Pricing</a>
             <a href="#highlights" className="transition-colors hover:text-foreground">Highlights</a>
           </div>
           <div className="flex items-center gap-2">
             <Link href="/login"><Button variant="ghost">Login</Button></Link>
-            <Link href="/signup"><Button>Start Free</Button></Link>
+            <Button onClick={() => continueToSignup()}>Start Free</Button>
           </div>
         </div>
       </header>
@@ -82,11 +139,9 @@ export default function Home() {
               </p>
 
               <div className="mt-8 flex flex-wrap gap-3">
-                <Link href="/signup">
-                  <Button size="lg" className="gap-2">
-                    Create Workspace <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </Link>
+                <Button size="lg" className="gap-2" onClick={() => continueToSignup()}>
+                  Create Workspace <ArrowRight className="h-4 w-4" />
+                </Button>
                 <Link href="/login"><Button size="lg" variant="outline">Go to Login</Button></Link>
               </div>
             </div>
@@ -121,6 +176,74 @@ export default function Home() {
           </div>
         </section>
 
+        <section id="pricing" className="py-16 sm:py-20">
+          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-10 text-center">
+              <h2 className="text-3xl font-bold tracking-tight">Select your billing plan</h2>
+              <p className="mt-2 text-muted-foreground">Choose one plan to continue with workspace creation.</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              {billingPlans.map((plan) => {
+                const isSelected = selectedPlan === plan.id;
+                return (
+                  <Card
+                    key={plan.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedPlan(plan.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedPlan(plan.id);
+                      }
+                    }}
+                    className={cn(
+                      "relative h-full cursor-pointer border-border/60 bg-card transition-all hover:border-primary/40 hover:shadow-md",
+                      isSelected && "border-primary shadow-lg ring-2 ring-primary/20",
+                    )}
+                  >
+                    <CardContent className="flex h-full flex-col p-6">
+                      {plan.recommended ? (
+                        <span className="mb-4 inline-flex w-fit rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">Most Popular</span>
+                      ) : (
+                        <span className="mb-4 inline-flex w-fit rounded-full border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground">Plan</span>
+                      )}
+                      <h3 className="text-xl font-semibold">{plan.name}</h3>
+                      <p className="mt-1 text-3xl font-bold">{plan.price}</p>
+                      <p className="text-sm text-muted-foreground">{plan.cadence}</p>
+                      <p className="mt-3 text-sm text-muted-foreground">{plan.description}</p>
+                      <div className="mt-5 space-y-2">
+                        {plan.features.map((feature) => (
+                          <div key={feature} className="flex items-start gap-2 text-sm text-muted-foreground">
+                            <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                            <span>{feature}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <Button className="mt-6" variant={isSelected ? "default" : "outline"}>
+                        {isSelected ? "Selected" : "Select plan"}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            <div className="mt-8 text-center">
+              <Button size="lg" disabled={!selectedPlan} className="gap-2" onClick={() => continueToSignup({ requireExplicitSelection: true })}>
+                Continue with selected plan <ArrowRight className="h-4 w-4" />
+              </Button>
+              {!selectedPlan ? (
+                <p className="mt-3 text-sm text-muted-foreground">Please select one billing plan to continue.</p>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">You selected the <span className="font-semibold text-foreground">{billingPlans.find((plan) => plan.id === selectedPlan)?.name}</span> plan.</p>
+              )}
+            </div>
+          </div>
+        </section>
+
         <section id="highlights" className="py-16 sm:py-20">
           <div className="mx-auto w-full max-w-7xl px-4 text-center sm:px-6 lg:px-8">
             <h3 className="text-2xl font-bold tracking-tight">Built for secure, collaborative SaaS operations</h3>
@@ -128,7 +251,7 @@ export default function Home() {
               From invitation-based onboarding to role-driven permissions and immediate deactivation enforcement, Automora keeps collaboration productive and controlled.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link href="/signup"><Button className="gap-2">Launch your workspace <ArrowRight className="h-4 w-4" /></Button></Link>
+              <Button className="gap-2" onClick={() => continueToSignup()}>Launch your workspace <ArrowRight className="h-4 w-4" /></Button>
               <Link href="/login"><Button variant="secondary">I already have an account</Button></Link>
             </div>
           </div>

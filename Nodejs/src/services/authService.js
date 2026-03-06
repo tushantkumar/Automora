@@ -5,6 +5,7 @@ import {
   deletePasswordResetToken,
   deleteUserAccountById,
   deleteUserByEmail,
+  disableExpiredTrialUserById,
   getAccountDeleteOtpDetails,
   getOnboardingDetailsByUserId,
   getPasswordResetTokenDetails,
@@ -20,6 +21,41 @@ import {
 import { createToken, createUserId, hashPassword, normalizeEmail, verifyPassword } from "../utils/auth.js";
 import { sendAccountDeletionOtpEmail, sendPasswordResetEmail, sendVerificationEmail } from "./emailService.js";
 
+
+const SUPPORTED_SIGNUP_PLANS = new Set(["starter", "growth", "enterprise"]);
+const normalizeSubscriptionPlan = (plan) => {
+  const normalized = String(plan || "").trim().toLowerCase();
+
+  if (!normalized) {
+    return { subscriptionPlan: "Starter", planSelectedExplicitly: false };
+  }
+
+  if (!SUPPORTED_SIGNUP_PLANS.has(normalized)) return null;
+
+  return {
+    subscriptionPlan: normalized.charAt(0).toUpperCase() + normalized.slice(1),
+    planSelectedExplicitly: true,
+  };
+};
+
+
+const enforceTrialWindow = async (user) => {
+  if (!user || user.is_disabled) return user;
+
+  const trialEndsAt = user.trial_ends_at ? new Date(user.trial_ends_at) : null;
+  if (!trialEndsAt || Number.isNaN(trialEndsAt.getTime())) return user;
+
+  if (trialEndsAt.getTime() > Date.now()) return user;
+
+  await disableExpiredTrialUserById(user.id);
+
+  return {
+    ...user,
+    is_disabled: true,
+    status: "Disabled",
+  };
+};
+
 export const publicUser = (user) => ({
   id: user.id,
   name: user.name,
@@ -34,9 +70,13 @@ export const publicUser = (user) => ({
   organizationName: user.organization_name || null,
   role: user.role || "Admin",
   isDisabled: Boolean(user.is_disabled),
+  trialStartedAt: user.trial_started_at || null,
+  trialEndsAt: user.trial_ends_at || null,
+  trialExpired: Boolean(user.trial_ends_at ? new Date(user.trial_ends_at).getTime() <= Date.now() : false),
+  planSelectedExplicitly: Boolean(user.plan_selected_explicitly),
 });
 
-export const signup = async ({ name, email, password }) => {
+export const signup = async ({ name, email, password, plan }) => {
   const cleanEmail = normalizeEmail(email);
 
   if (!name || !cleanEmail || !password) {
@@ -45,6 +85,11 @@ export const signup = async ({ name, email, password }) => {
 
   if (password.length < 8) {
     return { status: 400, body: { message: "password must be at least 8 characters" } };
+  }
+
+  const normalizedPlan = normalizeSubscriptionPlan(plan);
+  if (!normalizedPlan) {
+    return { status: 400, body: { message: "invalid billing plan selected" } };
   }
 
   const existingUser = await getUserByEmail(cleanEmail);
@@ -58,6 +103,8 @@ export const signup = async ({ name, email, password }) => {
     email: cleanEmail,
     passwordHash: hashPassword(password),
     verificationToken: createToken(),
+    subscriptionPlan: normalizedPlan.subscriptionPlan,
+    planSelectedExplicitly: normalizedPlan.planSelectedExplicitly,
   };
 
   let createdUser;
@@ -210,7 +257,7 @@ const getAuthorizedUser = async (authHeader) => {
 };
 
 export const saveOnboardingDetails = async (authHeader, payload) => {
-  const user = await getAuthorizedUser(authHeader);
+  const user = await enforceTrialWindow(await getAuthorizedUser(authHeader));
 
   if (!user) {
     return { status: 401, body: { message: "unauthorized" } };
@@ -280,14 +327,14 @@ export const getOnboardingDetails = async (authHeader) => {
 
 export const login = async ({ email, password }) => {
   const cleanEmail = normalizeEmail(email);
-  const user = await getUserByEmail(cleanEmail);
+  const user = await enforceTrialWindow(await getUserByEmail(cleanEmail));
 
   if (!user || !verifyPassword(password, user.password_hash)) {
     return { status: 401, body: { message: "invalid email or password" } };
   }
 
   if (user.is_disabled) {
-    return { status: 403, body: { message: "account is disabled" } };
+    return { status: 403, body: { message: "account is disabled or trial expired" } };
   }
 
   if (!user.is_verified) {
@@ -308,10 +355,14 @@ export const login = async ({ email, password }) => {
 };
 
 export const me = async (authHeader) => {
-  const user = await getAuthorizedUser(authHeader);
+  const user = await enforceTrialWindow(await getAuthorizedUser(authHeader));
 
   if (!user) {
     return { status: 401, body: { message: "unauthorized" } };
+  }
+
+  if (user.is_disabled) {
+    return { status: 403, body: { message: "account is deactivated. your trial has expired" } };
   }
 
   return { status: 200, body: { user: publicUser(user) } };

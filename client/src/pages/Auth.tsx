@@ -14,11 +14,18 @@ type AuthResponse = {
   token?: string;
 };
 
+const allowedPlans = new Set(["starter", "growth", "enterprise"]);
+
 export default function Auth() {
   const [location, navigate] = useLocation();
   const isLogin = location === "/login";
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+
+  const selectedPlan = (() => {
+    const rawPlan = new URLSearchParams(window.location.search).get("plan")?.toLowerCase();
+    return rawPlan && allowedPlans.has(rawPlan) ? rawPlan : null;
+  })();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -36,6 +43,7 @@ export default function Auth() {
           name: [firstName, lastName].filter(Boolean).join(" "),
           email,
           password,
+          plan: selectedPlan,
         };
 
     const endpoint = isLogin ? "/login" : "/signup";
@@ -86,6 +94,7 @@ export default function Auth() {
           </h2>
           <p className="text-muted-foreground mt-2">
             {isLogin ? "Enter your details to access your dashboard" : "Get started with AI automation today"}
+            {!isLogin && !selectedPlan ? " (Includes a 15-day free trial)" : ""}
           </p>
         </div>
 

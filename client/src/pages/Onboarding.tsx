@@ -143,7 +143,7 @@ export default function Onboarding() {
             A
           </div>
           <h1 className="text-3xl font-bold font-heading tracking-tight">Setting up your AI Agent</h1>
-          <p className="text-muted-foreground">Let's customize Autoflow for your business needs.</p>
+          <p className="text-muted-foreground">Let's customize Automora for your business needs.</p>
         </div>
 
         <div className="space-y-2">
