@@ -97,7 +97,7 @@ export default function Home() {
       return;
     }
 
-    const destination = selectedPlan ? signupUrl : "/signup?plan=starter";
+    const destination = selectedPlan ? signupUrl : "/signup";
     navigate(destination);
   };
 

@@ -23,13 +23,21 @@ import { sendAccountDeletionOtpEmail, sendPasswordResetEmail, sendVerificationEm
 
 
 const SUPPORTED_SIGNUP_PLANS = new Set(["starter", "growth", "enterprise"]);
-const DEFAULT_SIGNUP_PLAN = "starter";
-
 const normalizeSubscriptionPlan = (plan) => {
-  const normalized = String(plan || DEFAULT_SIGNUP_PLAN).trim().toLowerCase();
+  const normalized = String(plan || "").trim().toLowerCase();
+
+  if (!normalized) {
+    return { subscriptionPlan: "Starter", planSelectedExplicitly: false };
+  }
+
   if (!SUPPORTED_SIGNUP_PLANS.has(normalized)) return null;
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+
+  return {
+    subscriptionPlan: normalized.charAt(0).toUpperCase() + normalized.slice(1),
+    planSelectedExplicitly: true,
+  };
 };
+
 
 const enforceTrialWindow = async (user) => {
   if (!user || user.is_disabled) return user;
@@ -65,6 +73,7 @@ export const publicUser = (user) => ({
   trialStartedAt: user.trial_started_at || null,
   trialEndsAt: user.trial_ends_at || null,
   trialExpired: Boolean(user.trial_ends_at ? new Date(user.trial_ends_at).getTime() <= Date.now() : false),
+  planSelectedExplicitly: Boolean(user.plan_selected_explicitly),
 });
 
 export const signup = async ({ name, email, password, plan }) => {
@@ -78,8 +87,8 @@ export const signup = async ({ name, email, password, plan }) => {
     return { status: 400, body: { message: "password must be at least 8 characters" } };
   }
 
-  const subscriptionPlan = normalizeSubscriptionPlan(plan);
-  if (!subscriptionPlan) {
+  const normalizedPlan = normalizeSubscriptionPlan(plan);
+  if (!normalizedPlan) {
     return { status: 400, body: { message: "invalid billing plan selected" } };
   }
 
@@ -94,7 +103,8 @@ export const signup = async ({ name, email, password, plan }) => {
     email: cleanEmail,
     passwordHash: hashPassword(password),
     verificationToken: createToken(),
-    subscriptionPlan,
+    subscriptionPlan: normalizedPlan.subscriptionPlan,
+    planSelectedExplicitly: normalizedPlan.planSelectedExplicitly,
   };
 
   let createdUser;

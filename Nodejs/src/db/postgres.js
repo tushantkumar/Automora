@@ -25,6 +25,7 @@ export const initDatabase = async () => {
       status TEXT NOT NULL DEFAULT 'Active',
       trial_started_at TIMESTAMPTZ,
       trial_ends_at TIMESTAMPTZ,
+      plan_selected_explicitly BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
@@ -69,6 +70,7 @@ export const initDatabase = async () => {
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS workspace_id TEXT;`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS trial_started_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS plan_selected_explicitly BOOLEAN NOT NULL DEFAULT FALSE;`);
   await pool.query(`UPDATE auth_users SET workspace_id = id WHERE workspace_id IS NULL;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS industry TEXT;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS business_bio TEXT;`);

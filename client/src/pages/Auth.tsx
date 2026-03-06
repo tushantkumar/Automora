@@ -94,6 +94,7 @@ export default function Auth() {
           </h2>
           <p className="text-muted-foreground mt-2">
             {isLogin ? "Enter your details to access your dashboard" : "Get started with AI automation today"}
+            {!isLogin && !selectedPlan ? " (Includes a 15-day free trial)" : ""}
           </p>
         </div>
 
