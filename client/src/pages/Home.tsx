@@ -91,13 +91,14 @@ export default function Home() {
 
   const signupUrl = useMemo(() => (selectedPlan ? `/signup?plan=${selectedPlan}` : "/signup"), [selectedPlan]);
 
-  const continueToSignup = () => {
-    if (!selectedPlan) {
+  const continueToSignup = ({ requireExplicitSelection = false }: { requireExplicitSelection?: boolean } = {}) => {
+    if (!selectedPlan && requireExplicitSelection) {
       document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
-    navigate(signupUrl);
+    const destination = selectedPlan ? signupUrl : "/signup?plan=starter";
+    navigate(destination);
   };
 
   return (
@@ -115,7 +116,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <Link href="/login"><Button variant="ghost">Login</Button></Link>
-            <Button onClick={continueToSignup}>Start Free</Button>
+            <Button onClick={() => continueToSignup()}>Start Free</Button>
           </div>
         </div>
       </header>
@@ -138,7 +139,7 @@ export default function Home() {
               </p>
 
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button size="lg" className="gap-2" onClick={continueToSignup}>
+                <Button size="lg" className="gap-2" onClick={() => continueToSignup()}>
                   Create Workspace <ArrowRight className="h-4 w-4" />
                 </Button>
                 <Link href="/login"><Button size="lg" variant="outline">Go to Login</Button></Link>
@@ -231,7 +232,7 @@ export default function Home() {
             </div>
 
             <div className="mt-8 text-center">
-              <Button size="lg" disabled={!selectedPlan} className="gap-2" onClick={continueToSignup}>
+              <Button size="lg" disabled={!selectedPlan} className="gap-2" onClick={() => continueToSignup({ requireExplicitSelection: true })}>
                 Continue with selected plan <ArrowRight className="h-4 w-4" />
               </Button>
               {!selectedPlan ? (
@@ -250,7 +251,7 @@ export default function Home() {
               From invitation-based onboarding to role-driven permissions and immediate deactivation enforcement, Automora keeps collaboration productive and controlled.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Button className="gap-2" onClick={continueToSignup}>Launch your workspace <ArrowRight className="h-4 w-4" /></Button>
+              <Button className="gap-2" onClick={() => continueToSignup()}>Launch your workspace <ArrowRight className="h-4 w-4" /></Button>
               <Link href="/login"><Button variant="secondary">I already have an account</Button></Link>
             </div>
           </div>
