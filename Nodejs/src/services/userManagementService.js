@@ -81,6 +81,11 @@ const sendInviteMessage = async ({ authHeader, inviteeEmail, inviterName, invite
                 <p style="margin:14px 0 0 0;font-size:12px;line-height:1.6;color:#64748b;">If you did not expect this invitation, you can safely ignore this email.</p>
               </td>
             </tr>
+            <tr>
+              <td style="padding:16px 28px;background:#F8FAFC;border-top:1px solid #E2E8F0;">
+                <p style="margin:0;font-size:12px;line-height:18px;color:#64748B;">© ${new Date().getFullYear()} © 2026 Automora · Secure workflow automation for modern teams</p>
+              </td>
+            </tr>
           </table>
         </td>
       </tr>
