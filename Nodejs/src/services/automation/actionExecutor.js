@@ -81,11 +81,11 @@ const buildAutomationInvoicePdfBuffer = async (invoice, companyName = "Automora"
   const taxRate = `${Number(invoice?.tax_rate || 0).toFixed(2)}%`;
 
   let y = 40;
-  doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#f5f3ff", "#ddd6fe");
-  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(24).text("INVOICE", 56, y + 18);
-  doc.fillColor("#6d28d9").font("Helvetica").fontSize(11).text(`Invoice #${invoiceNumber}`, 56, y + 50);
-  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(`Organization: ${String(companyName || "Automora")}`, 210, y + 52, { width: 200 });
-  doc.fillColor("#1f2937").font("Helvetica").fontSize(11).text(`Generated: ${new Date().toLocaleDateString()}`, 420, y + 24, { align: "right", width: 120 });
+  doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#4f46e5", "#4338ca");
+  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text("Autimora Invoice", 56, y + 18);
+  doc.fillColor("#e0e7ff").font("Helvetica").fontSize(11).text(`Invoice #${invoiceNumber}`, 56, y + 50);
+  doc.fillColor("#e5e7eb").font("Helvetica").fontSize(10).text(`Organization: ${String(companyName || "Automora")}`, 230, y + 52, { width: 200 });
+  doc.fillColor("#f3f4f6").font("Helvetica").fontSize(11).text(`Generated: ${new Date().toLocaleDateString()}`, 420, y + 24, { align: "right", width: 120 });
 
   y += 96;
   doc.roundedRect(40, y, 250, 122, 10).fillAndStroke("#ffffff", "#e5e7eb");
