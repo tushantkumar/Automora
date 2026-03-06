@@ -37,9 +37,12 @@ export default function VerifyEmail() {
           localStorage.setItem("authToken", data.token);
         }
 
+        const onboardingCompleted = Boolean(data?.user?.onboardingCompleted);
+        const redirectTo = onboardingCompleted ? "/dashboard" : "/onboarding";
+
         setStatus("success");
-        setMessage("Email verified successfully. Redirecting to onboarding...");
-        setTimeout(() => navigate("/onboarding"), 1200);
+        setMessage(`Email verified successfully. Redirecting to ${onboardingCompleted ? "dashboard" : "onboarding"}...`);
+        setTimeout(() => navigate(redirectTo), 1200);
       } catch {
         setStatus("error");
         setMessage("Could not verify email. Please try again.");
