@@ -86,6 +86,9 @@ export default function Settings() {
   const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
   const [deleteTargetUser, setDeleteTargetUser] = useState<ManagedUser | null>(null);
   const [deletingManagedUser, setDeletingManagedUser] = useState(false);
+  const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
+  const [deactivateTargetUser, setDeactivateTargetUser] = useState<ManagedUser | null>(null);
+  const [deactivatingManagedUser, setDeactivatingManagedUser] = useState(false);
   const [loadingManagedUsers, setLoadingManagedUsers] = useState(false);
   const [invitingUser, setInvitingUser] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "Viewer" });
@@ -389,8 +392,18 @@ export default function Settings() {
     }
   };
 
+  const requestDeactivateUser = (user: ManagedUser) => {
+    setDeactivateTargetUser(user);
+    setDeactivateDialogOpen(true);
+  };
+
   const disableUser = async (userId: string, disabled: boolean) => {
     if (!token) return;
+
+    if (disabled) {
+      setDeactivatingManagedUser(true);
+    }
+
     try {
       const response = await fetch(`${AUTH_API_URL}/admin/users/${userId}/disable`, {
         method: "PATCH",
@@ -405,12 +418,22 @@ export default function Settings() {
         toast({ title: "Unable to update user", description: data?.message || "Please try again." });
         return;
       }
+
+      if (disabled) {
+        toast({ title: "User deactivated." });
+        setDeactivateDialogOpen(false);
+        setDeactivateTargetUser(null);
+      }
+
       void loadManagedUsers();
     } catch {
       toast({ title: "Unable to update user", description: "Please try again." });
+    } finally {
+      if (disabled) {
+        setDeactivatingManagedUser(false);
+      }
     }
   };
-
 
 
 
@@ -653,7 +676,17 @@ export default function Settings() {
                                 <span className="text-xs text-muted-foreground">Workspace Admin</span>
                               ) : (
                                 <div className="flex items-center justify-end gap-2">
-                                  <Button variant={user.isDisabled ? "default" : "destructive"} size="sm" onClick={() => { void disableUser(user.id, !user.isDisabled); }}>
+                                  <Button
+                                    variant={user.isDisabled ? "default" : "destructive"}
+                                    size="sm"
+                                    onClick={() => {
+                                      if (user.isDisabled) {
+                                        void disableUser(user.id, false);
+                                        return;
+                                      }
+                                      requestDeactivateUser(user);
+                                    }}
+                                  >
                                     {user.isDisabled ? "Enable User" : "Deactivate"}
                                   </Button>
                                   <Button variant="destructive" size="sm" onClick={() => requestDeleteUser(user)}>Delete</Button>
@@ -671,6 +704,37 @@ export default function Settings() {
           )}
         </TabsContent>
       </Tabs>
+
+      <AlertDialog
+        open={deactivateDialogOpen}
+        onOpenChange={(open) => {
+          setDeactivateDialogOpen(open);
+          if (!open && !deactivatingManagedUser) setDeactivateTargetUser(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate user account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`This will immediately block ${deactivateTargetUser?.name || "this user"} (${deactivateTargetUser?.email || ""}) from accessing the application until re-enabled.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deactivatingManagedUser}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deactivatingManagedUser}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(event) => {
+                event.preventDefault();
+                if (!deactivateTargetUser) return;
+                void disableUser(deactivateTargetUser.id, true);
+              }}
+            >
+              {deactivatingManagedUser ? "Deactivating..." : "Deactivate User"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={deleteUserDialogOpen}
