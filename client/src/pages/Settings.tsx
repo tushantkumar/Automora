@@ -157,7 +157,7 @@ export default function Settings() {
       const data = await response.json();
 
       if (!response.ok) {
-        toast({ title: "Unable to save system settings.", description: data?.message || "Please try again." });
+        toast({ title: "⚙️ Settings", description: data?.message || "Unable to save system settings. Please try again." });
         return;
       }
 
@@ -165,10 +165,10 @@ export default function Settings() {
         supportHighlightText: String(data?.settings?.supportHighlightText || ""),
         companyName: String(data?.settings?.companyName || ""),
       });
-      toast({ title: "System settings saved successfully." });
+      toast({ title: "⚙️ Settings", description: "System settings saved successfully." });
       setSystemUpdatedPopupOpen(true);
     } catch {
-      toast({ title: "Unable to save system settings.", description: "Please try again." });
+      toast({ title: "⚙️ Settings", description: "Unable to save system settings. Please try again." });
     } finally {
       setSavingSystemSettings(false);
     }

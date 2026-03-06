@@ -11,6 +11,7 @@ const LIMIT = 100;
 
 const NOTIFICATION_TITLE_MAP: Record<string, string> = {
   "⚙️ automations": "⚙️ Automations",
+  "⚙️ settings": "⚙️ Settings",
   "👤 customers": "👤 Customers",
   "🧾 invoices": "🧾 Invoices",
   "✉️ mail templates": "✉️ Mail Templates",
