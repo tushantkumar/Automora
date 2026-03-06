@@ -15,6 +15,9 @@ import { clearNotifications, getNotifications, subscribeNotifications, type AppN
 
 interface AppLayoutProps {
   children: React.ReactNode;
+  searchQuery?: string;
+  onSearchQueryChange?: (value: string) => void;
+  searchPlaceholder?: string;
 }
 
 const formatNotificationTime = (value: string) => {
@@ -23,9 +26,25 @@ const formatNotificationTime = (value: string) => {
   return date.toLocaleString();
 };
 
-export function AppLayout({ children }: AppLayoutProps) {
+export function AppLayout({
+  children,
+  searchQuery,
+  onSearchQueryChange,
+  searchPlaceholder = "Search workflows, customers, emails...",
+}: AppLayoutProps) {
   const [, navigate] = useLocation();
   const [notifications, setNotifications] = useState<AppNotification[]>(() => getNotifications());
+  const [internalSearchQuery, setInternalSearchQuery] = useState("");
+
+  const resolvedSearchQuery = searchQuery ?? internalSearchQuery;
+
+  const handleSearchChange = (value: string) => {
+    if (onSearchQueryChange) {
+      onSearchQueryChange(value);
+      return;
+    }
+    setInternalSearchQuery(value);
+  };
 
   useEffect(() => {
     setNotifications(getNotifications());
@@ -45,7 +64,9 @@ export function AppLayout({ children }: AppLayoutProps) {
             <div className="relative w-full">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Search workflows, customers, emails..."
+                value={resolvedSearchQuery}
+                onChange={(event) => handleSearchChange(event.target.value)}
+                placeholder={searchPlaceholder}
                 className="pl-9 bg-muted/50 border-transparent hover:bg-muted focus:bg-background focus:border-ring transition-all h-9"
               />
             </div>

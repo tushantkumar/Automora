@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useLocation } from "wouter";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Bot, FileText, Receipt, TriangleAlert, TrendingUp, Users, LogOut } from "lucide-react";
+import { Bot, FileText, Receipt, TriangleAlert, TrendingUp, Users } from "lucide-react";
 
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ?? "http://localhost:4000";
 
@@ -18,11 +18,8 @@ type Invoice = {
   updated_at?: string;
   created_at?: string;
 };
-type InvoiceInsights = { total_revenue: number; total_invoices: number; total_overdue?: number };
 type Automation = { id: string; name?: string; is_active?: boolean; created_at?: string; updated_at?: string };
 type MailTemplate = { id: string };
-
-const emptyInvoiceInsights: InvoiceInsights = { total_revenue: 0, total_invoices: 0, total_overdue: 0 };
 
 const amountFormatter = (value: number | string) => {
   const parsed = Number(value || 0);
@@ -99,7 +96,7 @@ export default function Dashboard() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [templates, setTemplates] = useState<MailTemplate[]>([]);
-  const [invoiceInsights, setInvoiceInsights] = useState<InvoiceInsights>(emptyInvoiceInsights);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("authToken");
@@ -111,14 +108,12 @@ export default function Dashboard() {
           meResponse,
           customerResponse,
           invoiceResponse,
-          invoiceInsightsResponse,
           automationsResponse,
           templatesResponse,
         ] = await Promise.all([
           fetch(`${AUTH_API_URL}/me`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${AUTH_API_URL}/customers`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${AUTH_API_URL}/invoices`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${AUTH_API_URL}/invoices/insights`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${AUTH_API_URL}/automations`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${AUTH_API_URL}/mail-templates`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
@@ -142,11 +137,6 @@ export default function Dashboard() {
           setInvoices(Array.isArray(invoiceData?.invoices) ? invoiceData.invoices : []);
         }
 
-        if (invoiceInsightsResponse.ok) {
-          const insightData = await invoiceInsightsResponse.json();
-          setInvoiceInsights({ ...emptyInvoiceInsights, ...(insightData?.insights || {}) });
-        }
-
         if (automationsResponse.ok) {
           const automationData = await automationsResponse.json();
           setAutomations(Array.isArray(automationData?.automations) ? automationData.automations : []);
@@ -164,29 +154,61 @@ export default function Dashboard() {
     void loadDashboardData();
   }, [navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem("authToken");
-    navigate("/");
-  };
 
-  const activeAutomationCount = useMemo(() => automations.filter((item) => Boolean(item?.is_active)).length, [automations]);
-  const overdueInvoiceCount = Number(invoiceInsights.total_overdue || 0);
-  const recentCustomers = useMemo(() => toRecentCustomers(customers), [customers]);
-  const recentInvoices = useMemo(() => toRecentInvoices(invoices), [invoices]);
-  const invoiceBarData = useMemo(() => toInvoiceBarData(invoices), [invoices]);
-  const automationLineData = useMemo(() => toAutomationLineData(automations), [automations]);
+  const filteredData = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return { customers, invoices, automations, templates };
+    }
+
+    const filteredCustomers = customers.filter((customer) => {
+      const haystack = [customer.name, customer.client, customer.status].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+
+    const filteredInvoices = invoices.filter((invoice) => {
+      const haystack = [invoice.invoice_number, invoice.client_name, invoice.status].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+
+    const filteredAutomations = automations.filter((automation) => {
+      const haystack = [automation.name, automation.is_active ? "active" : "inactive"].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+
+    const filteredTemplates = templates.filter((template) => String(template.id).toLowerCase().includes(query));
+
+    return {
+      customers: filteredCustomers,
+      invoices: filteredInvoices,
+      automations: filteredAutomations,
+      templates: filteredTemplates,
+    };
+  }, [searchQuery, customers, invoices, automations, templates]);
+
+  const activeAutomationCount = useMemo(() => filteredData.automations.filter((item) => Boolean(item?.is_active)).length, [filteredData.automations]);
+  const overdueInvoiceCount = useMemo(() => filteredData.invoices.filter((item) => (item.status || "").toLowerCase() === "overdue").length, [filteredData.invoices]);
+  const totalRevenue = useMemo(() => filteredData.invoices.reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0), [filteredData.invoices]);
+  const recentCustomers = useMemo(() => toRecentCustomers(filteredData.customers), [filteredData.customers]);
+  const recentInvoices = useMemo(() => toRecentInvoices(filteredData.invoices), [filteredData.invoices]);
+  const invoiceBarData = useMemo(() => toInvoiceBarData(filteredData.invoices), [filteredData.invoices]);
+  const automationLineData = useMemo(() => toAutomationLineData(filteredData.automations), [filteredData.automations]);
 
   const kpis = [
-    { label: "Total Customer", value: String(customers.length), icon: Users, iconBg: "bg-blue-500/10", iconColor: "text-blue-600" },
-    { label: "Total Invoice", value: String(invoiceInsights.total_invoices || 0), icon: Receipt, iconBg: "bg-violet-500/10", iconColor: "text-violet-600" },
+    { label: "Total Customer", value: String(filteredData.customers.length), icon: Users, iconBg: "bg-blue-500/10", iconColor: "text-blue-600" },
+    { label: "Total Invoice", value: String(filteredData.invoices.length), icon: Receipt, iconBg: "bg-violet-500/10", iconColor: "text-violet-600" },
     { label: "Overdue Invoice", value: String(overdueInvoiceCount), icon: TriangleAlert, iconBg: "bg-rose-500/10", iconColor: "text-rose-600" },
     { label: "Active Automation", value: String(activeAutomationCount), icon: Bot, iconBg: "bg-emerald-500/10", iconColor: "text-emerald-600" },
-    { label: "Total Mail Template", value: String(templates.length), icon: FileText, iconBg: "bg-cyan-500/10", iconColor: "text-cyan-600" },
-    { label: "Total Revenue", value: amountFormatter(invoiceInsights.total_revenue), icon: TrendingUp, iconBg: "bg-amber-500/10", iconColor: "text-amber-600" },
+    { label: "Total Mail Template", value: String(filteredData.templates.length), icon: FileText, iconBg: "bg-cyan-500/10", iconColor: "text-cyan-600" },
+    { label: "Total Revenue", value: amountFormatter(totalRevenue), icon: TrendingUp, iconBg: "bg-amber-500/10", iconColor: "text-amber-600" },
   ];
 
   return (
-    <AppLayout>
+    <AppLayout
+      searchQuery={searchQuery}
+      onSearchQueryChange={setSearchQuery}
+      searchPlaceholder="Search dashboard metrics, activity, and charts..."
+    >
       <div className="space-y-6">
         <div className="rounded-2xl border bg-gradient-to-r from-violet-50 via-background to-blue-50 p-6">
           <h1 className="text-3xl font-bold text-foreground">Dashboard Overview</h1>
