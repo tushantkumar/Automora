@@ -21,7 +21,25 @@ export const canDeleteResources = (role) => {
   return normalized === APP_ROLES.ADMIN || normalized === APP_ROLES.OWNER;
 };
 
-export const canModifyResources = (role) => {
+export const canCreateResources = (role) => {
+  const normalized = normalizeRole(role);
+  return normalized === APP_ROLES.ADMIN || normalized === APP_ROLES.OWNER || normalized === APP_ROLES.AUTHOR;
+};
+
+export const canUpdateResources = (role) => {
   const normalized = normalizeRole(role);
   return normalized === APP_ROLES.ADMIN || normalized === APP_ROLES.OWNER || normalized === APP_ROLES.EDITOR || normalized === APP_ROLES.AUTHOR;
 };
+
+export const canUploadResources = (role) => {
+  const normalized = normalizeRole(role);
+  return normalized === APP_ROLES.ADMIN || normalized === APP_ROLES.OWNER || normalized === APP_ROLES.AUTHOR;
+};
+
+export const canSendMail = (role) => {
+  const normalized = normalizeRole(role);
+  return normalized === APP_ROLES.ADMIN || normalized === APP_ROLES.OWNER || normalized === APP_ROLES.EDITOR || normalized === APP_ROLES.AUTHOR;
+};
+
+// Backward-compatible alias for existing call sites.
+export const canModifyResources = canUpdateResources;

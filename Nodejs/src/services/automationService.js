@@ -11,7 +11,7 @@ import {
   updateAutomationById,
 } from "../db/automationRepository.js";
 import { listMailTemplatesByUserId } from "../db/mailTemplateRepository.js";
-import { canDeleteResources, canModifyResources } from "./rbacService.js";
+import { canCreateResources, canDeleteResources, canUpdateResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -252,7 +252,7 @@ export const listAutomationsForUser = async (authHeader, query = {}) => {
 export const createAutomationForUser = async (authHeader, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
-  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+  if (!canCreateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
 
   const parsed = await validateAndNormalizePayload({ userId: user.id, payload });
@@ -270,7 +270,7 @@ export const createAutomationForUser = async (authHeader, payload) => {
 export const updateAutomationForUser = async (authHeader, automationId, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
-  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+  if (!canUpdateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const existing = await getAutomationById({ userId: user.id, automationId });
   if (!existing) return { status: 404, body: { message: "automation not found" } };
@@ -301,7 +301,7 @@ export const deleteAutomationForUser = async (authHeader, automationId) => {
 export const toggleAutomationForUser = async (authHeader, automationId, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
-  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+  if (!canUpdateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
 
   const isActive = Boolean(payload?.isActive);
