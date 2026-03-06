@@ -63,7 +63,7 @@ const parseInvoiceLineItems = (lineItems) => {
 };
 
 const buildAutomationInvoicePdfBuffer = async (invoice) => {
-  const doc = new PDFDocument({ margin: 48 });
+  const doc = new PDFDocument({ size: "A4", margin: 40 });
   const chunks = [];
   const done = new Promise((resolve, reject) => {
     doc.on("data", (chunk) => chunks.push(chunk));
@@ -80,34 +80,64 @@ const buildAutomationInvoicePdfBuffer = async (invoice) => {
   const amount = toCurrency(invoice?.amount);
   const taxRate = `${Number(invoice?.tax_rate || 0).toFixed(2)}%`;
 
-  doc.font("Helvetica-Bold").fontSize(20).text("INVOICE", { align: "left" });
-  doc.moveDown(1);
+  let y = 40;
+  doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#f5f3ff", "#ddd6fe");
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(24).text("INVOICE", 56, y + 18);
+  doc.fillColor("#6d28d9").font("Helvetica").fontSize(11).text(`Invoice #${invoiceNumber}`, 56, y + 50);
+  doc.fillColor("#1f2937").font("Helvetica").fontSize(11).text(`Generated: ${new Date().toLocaleDateString()}`, 420, y + 24, { align: "right", width: 120 });
 
-  doc.font("Helvetica").fontSize(11);
-  doc.text(`Invoice Number: ${invoiceNumber}`);
-  doc.text(`Customer: ${customerName}`);
-  doc.text(`Customer Email: ${customerEmail}`);
-  doc.text(`Issue Date: ${issueDate}`);
-  doc.text(`Due Date: ${dueDate}`);
-  doc.text(`Status: ${status}`);
-  doc.text(`Tax: ${taxRate}`);
-  doc.text(`Total Amount: ${amount}`);
+  y += 96;
+  doc.roundedRect(40, y, 250, 122, 10).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("BILLED TO", 54, y + 14);
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(12).text(customerName, 54, y + 34, { width: 220 });
+  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(customerEmail, 54, y + 56, { width: 220 });
+
+  doc.roundedRect(305, y, 250, 122, 10).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("INVOICE DETAILS", 319, y + 14);
+  doc.fillColor("#111827").font("Helvetica").fontSize(10);
+  doc.text(`Issue Date: ${issueDate}`, 319, y + 34);
+  doc.text(`Due Date: ${dueDate}`, 319, y + 50);
+  doc.text(`Status: ${status}`, 319, y + 66);
+  doc.text(`Tax: ${taxRate}`, 319, y + 82);
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Total: ${amount}`, 319, y + 100);
+
+  y += 142;
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(12).text("Line Items", 40, y);
+  y += 20;
+
+  doc.roundedRect(40, y, 515, 26, 6).fillAndStroke("#ede9fe", "#ddd6fe");
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(9);
+  doc.text("Description", 52, y + 8, { width: 260 });
+  doc.text("Qty", 330, y + 8, { width: 60, align: "right" });
+  doc.text("Rate", 395, y + 8, { width: 70, align: "right" });
+  doc.text("Total", 470, y + 8, { width: 70, align: "right" });
+  y += 30;
 
   const lineItems = parseInvoiceLineItems(invoice?.line_items);
-  if (lineItems.length > 0) {
-    doc.moveDown(1);
-    doc.font("Helvetica-Bold").text("Line Items");
-    doc.moveDown(0.5);
-    doc.font("Helvetica");
+  const rows = lineItems.length > 0 ? lineItems : [{ description: "Invoice Amount", quantity: 1, rate: Number(invoice?.amount || 0) }];
 
-    lineItems.forEach((item, index) => {
-      const qty = Number(item?.quantity || 0);
-      const rate = Number(item?.rate || 0);
-      const total = qty * rate;
-      doc.text(`${index + 1}. ${String(item?.description || "-")}`);
-      doc.text(`   Qty: ${qty}  Rate: ${toCurrency(rate)}  Total: ${toCurrency(total)}`);
-    });
-  }
+  rows.forEach((item) => {
+    if (y > 760) {
+      doc.addPage();
+      y = 48;
+    }
+
+    const qty = Number(item?.quantity || 0);
+    const rate = Number(item?.rate || 0);
+    const total = qty * rate;
+
+    doc.roundedRect(40, y, 515, 24, 5).fillAndStroke("#ffffff", "#e5e7eb");
+    doc.fillColor("#111827").font("Helvetica").fontSize(9);
+    doc.text(String(item?.description || "-"), 52, y + 7, { width: 260 });
+    doc.text(String(qty), 330, y + 7, { width: 60, align: "right" });
+    doc.text(toCurrency(rate), 395, y + 7, { width: 70, align: "right" });
+    doc.text(toCurrency(total), 470, y + 7, { width: 70, align: "right" });
+    y += 28;
+  });
+
+  y += 10;
+  doc.roundedRect(340, y, 215, 34, 8).fillAndStroke("#f5f3ff", "#ddd6fe");
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Grand Total: ${amount}`, 355, y + 11);
 
   doc.end();
   return done;
@@ -401,7 +431,7 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
     from: systemSettings.smtpFrom,
     subject: rendered.subject,
     bodyText: rendered.body,
-    htmlBody: rendered.html,
+    htmlBody: hasInvoice ? "" : rendered.html,
     replyToExternalId,
     attachments,
   });
