@@ -15,6 +15,7 @@ import {
 import { createUserId } from "../utils/auth.js";
 import { getCustomerByEmail, getCustomerById, setCustomerRevenueById } from "../db/customerRepository.js";
 import { processInvoiceStatusChangeAutomations } from "./invoiceWorkflowAutomationService.js";
+import { sendGmailEmail } from "./emailIntegrationService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -586,6 +587,56 @@ export const getInvoiceImportTemplateForUser = async (authHeader) => {
     body: {
       buffer: Buffer.from(buffer),
       fileName: "invoice-upload-template.xlsx",
+    },
+  };
+};
+
+
+export const sendInvoiceEmailForUser = async (authHeader, invoiceId) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const targetInvoiceId = String(invoiceId || "").trim();
+  if (!targetInvoiceId) return { status: 400, body: { message: "invoice id is required" } };
+
+  const invoice = await getInvoiceWithCustomerByIdForAutomation({ userId: user.id, invoiceId: targetInvoiceId });
+  if (!invoice) return { status: 404, body: { message: "invoice not found" } };
+
+  const customerEmail = String(invoice?.customer_email || "").trim();
+  if (!customerEmail) return { status: 400, body: { message: "customer email not found for this invoice" } };
+
+  let buffer;
+  try {
+    buffer = await generateInvoicePdfBuffer({ invoice });
+  } catch {
+    return { status: 502, body: { message: "Unable to generate invoice PDF" } };
+  }
+
+  const invoiceNumber = String(invoice?.invoice_number || invoice?.id || "invoice").trim() || "invoice";
+  const clientName = String(invoice?.customer_name || invoice?.client_name || "Customer").trim() || "Customer";
+
+  const result = await sendGmailEmail(authHeader, {
+    to: customerEmail,
+    subject: `Invoice ${invoiceNumber} from ${String(user?.organization_name || user?.name || "your company")}`.trim(),
+    body: `Hi ${clientName},\n\nPlease find your invoice ${invoiceNumber} attached as PDF.\n\nThank you.`,
+    attachments: [{
+      filename: `invoice-${invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`,
+      contentType: "application/pdf",
+      contentBase64: buffer.toString("base64"),
+    }],
+  });
+
+  if (result.status !== 200) {
+    return result;
+  }
+
+  return {
+    status: 200,
+    body: {
+      message: "Invoice email sent successfully",
+      to: customerEmail,
+      invoiceNumber,
+      gmailMessageId: result?.body?.gmailMessageId || null,
     },
   };
 };

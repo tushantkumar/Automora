@@ -119,16 +119,25 @@ const encodeBase64Url = (value) =>
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 
-const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
+const toBase64Chunks = (value, size = 76) => {
+  const text = String(value || "").replace(/\s+/g, "");
+  const chunks = [];
+  for (let index = 0; index < text.length; index += size) {
+    chunks.push(text.slice(index, index + size));
+  }
+  return chunks.join("\r\n");
+};
+
+const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachments = [] }) => {
   const safeTo = String(to || "").trim();
   const safeSubject = String(subject || "").trim() || "(no subject)";
   const safeBody = String(bodyText || "").trim();
   const safeInReplyTo = String(inReplyTo || "").trim();
   const safeReferences = String(references || "").trim();
 
+  const safeAttachments = Array.isArray(attachments) ? attachments.filter((item) => String(item?.contentBase64 || "").trim()) : [];
   const headers = [
     `To: ${safeTo}`,
-    "Content-Type: text/plain; charset=utf-8",
     "MIME-Version: 1.0",
     `Subject: ${safeSubject}`,
   ];
@@ -136,7 +145,38 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references }) => {
   if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
   if (safeReferences) headers.push(`References: ${safeReferences}`);
 
-  return [...headers, "", safeBody].join("\r\n");
+  if (safeAttachments.length === 0) {
+    headers.push("Content-Type: text/plain; charset=utf-8");
+    return [...headers, "", safeBody].join("\r\n");
+  }
+
+  const boundary = `mixed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+
+  const parts = [
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    safeBody,
+  ];
+
+  safeAttachments.forEach((attachment) => {
+    const fileName = String(attachment?.filename || "attachment.bin").replace(/["\r\n]/g, "");
+    const contentType = String(attachment?.contentType || "application/octet-stream");
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${contentType}; name="${fileName}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${fileName}"`,
+      "",
+      toBase64Chunks(attachment?.contentBase64 || ""),
+    );
+  });
+
+  parts.push(`--${boundary}--`, "");
+
+  return [...headers, "", ...parts].join("\r\n");
 };
 
 const getHeaderValue = (headers, name) => {
@@ -597,6 +637,15 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
   const subject = String(payload.subject || "").trim();
   const bodyText = String(payload.body || "").trim();
   const replyToExternalId = String(payload.replyToExternalId || "").trim();
+  const attachments = Array.isArray(payload?.attachments)
+    ? payload.attachments
+      .map((item) => ({
+        filename: String(item?.filename || "attachment.bin").trim(),
+        contentType: String(item?.contentType || "application/octet-stream").trim(),
+        contentBase64: String(item?.contentBase64 || "").trim(),
+      }))
+      .filter((item) => item.contentBase64)
+    : [];
 
   if (!to || !bodyText) {
     return { status: 400, body: { message: "Recipient and message body are required" } };
@@ -628,7 +677,7 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
 
     const inReplyTo = replyContext?.messageIdHeader || "";
     const references = [replyContext?.referencesHeader, replyContext?.messageIdHeader].filter(Boolean).join(" ").trim();
-    const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references }));
+    const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references, attachments }));
 
     const response = await gmail.users.messages.send({
       userId: "me",

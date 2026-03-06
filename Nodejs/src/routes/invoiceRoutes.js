@@ -9,6 +9,7 @@ import {
   downloadInvoicesExcelHandler,
   uploadInvoicesExcelHandler,
   downloadInvoiceImportTemplateHandler,
+  sendInvoiceEmailHandler,
 } from "../controllers/invoiceController.js";
 
 const invoiceRouter = Router();
@@ -19,6 +20,7 @@ invoiceRouter.get("/invoices/download/excel", downloadInvoicesExcelHandler);
 invoiceRouter.get("/invoices/upload/template", downloadInvoiceImportTemplateHandler);
 invoiceRouter.post("/invoices/upload/excel", uploadInvoicesExcelHandler);
 invoiceRouter.get("/invoices/:invoiceId/download", downloadInvoicePdfHandler);
+invoiceRouter.post("/invoices/:invoiceId/send-email", sendInvoiceEmailHandler);
 invoiceRouter.post("/invoices", createInvoiceHandler);
 invoiceRouter.put("/invoices/:invoiceId", updateInvoiceHandler);
 invoiceRouter.delete("/invoices/:invoiceId", deleteInvoiceHandler);
