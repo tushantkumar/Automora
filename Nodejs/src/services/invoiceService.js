@@ -185,9 +185,8 @@ const generateInvoicePdfBuffer = async ({ invoice, companyName = "Automora" }) =
 
   let y = 40;
   doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#4f46e5", "#4338ca");
-  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text("Autimora Invoice", 56, y + 18);
-  doc.fillColor("#e0e7ff").font("Helvetica").fontSize(11).text(`Invoice #${invoiceNumber}`, 56, y + 50);
-  doc.fillColor("#e5e7eb").font("Helvetica").fontSize(10).text(`Organization: ${String(companyName || "Automora")}`, 230, y + 52, { width: 200 });
+  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text(`${String(companyName || "Automora")} Invoice`, 56, y + 18);
+  doc.fillColor("#e0e7ff").font("Helvetica").fontSize(11).text(`Invoice ${invoiceNumber}`, 56, y + 50);
   doc.fillColor("#f3f4f6").font("Helvetica").fontSize(11).text(`Generated: ${new Date().toLocaleDateString()}`, 420, y + 24, { align: "right", width: 120 });
 
   y += 96;
@@ -203,7 +202,7 @@ const generateInvoicePdfBuffer = async ({ invoice, companyName = "Automora" }) =
   doc.text(`Due Date: ${dueDate}`, 319, y + 50);
   doc.text(`Status: ${status}`, 319, y + 66);
   doc.text(`Tax: ${taxRate}`, 319, y + 82);
-  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Subtotal: ${subtotal}`, 319, y + 100);
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Grand Total: ${amount}`, 319, y + 100);
 
   y += 132;
   doc.roundedRect(40, y, 515, 42, 8).fillAndStroke("#ffffff", "#e5e7eb");
