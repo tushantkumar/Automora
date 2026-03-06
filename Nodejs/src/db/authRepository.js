@@ -23,7 +23,7 @@ const USER_SELECT = `SELECT
   u.plan_selected_explicitly,
   u.created_at,
   o.organization_name,
-  CASE WHEN u.role = 'Author' THEN EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) ELSE (u.invited_by IS NOT NULL OR EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id)) END AS onboarding_completed
+  CASE WHEN u.invited_by IS NOT NULL THEN TRUE WHEN u.role = 'Author' THEN EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) ELSE EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) END AS onboarding_completed
 FROM auth_users u
 LEFT JOIN auth_onboarding_details o ON o.user_id = u.id`;
 
@@ -355,7 +355,7 @@ export const getUserBySessionToken = async (token) => {
       u.plan_selected_explicitly,
       u.created_at,
       o.organization_name,
-      CASE WHEN u.role = 'Author' THEN EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) ELSE (u.invited_by IS NOT NULL OR EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id)) END AS onboarding_completed
+      CASE WHEN u.invited_by IS NOT NULL THEN TRUE WHEN u.role = 'Author' THEN EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) ELSE EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) END AS onboarding_completed
      FROM auth_sessions s
      JOIN auth_users u ON s.user_id = u.id
      LEFT JOIN auth_onboarding_details o ON o.user_id = u.id

@@ -94,6 +94,7 @@ export default function Settings() {
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "Viewer" });
   const [userFilter, setUserFilter] = useState({ name: "", email: "", role: "all" });
   const { toast } = useToast();
+  const isWorkspaceAdmin = profile.role === "Admin";
 
   const loadIntegrations = async () => {
     if (!token) return;
@@ -226,6 +227,10 @@ export default function Settings() {
 
   const disconnectIntegration = async (provider: "gmail" | "outlook") => {
     if (!token) return;
+    if (!isWorkspaceAdmin) {
+      toast({ title: "Permission denied", description: "Only workspace admin can disconnect integrations." });
+      return;
+    }
 
     setDisconnectingProvider(provider);
 
@@ -611,7 +616,7 @@ export default function Settings() {
               actionDisabled={integrations.gmail.connected || connectingGmail}
               onAction={connectGmail}
               secondaryActionLabel={disconnectingProvider === "gmail" ? "Disconnecting..." : "Disconnect"}
-              secondaryActionDisabled={!integrations.gmail.connected || disconnectingProvider === "gmail"}
+              secondaryActionDisabled={!isWorkspaceAdmin || !integrations.gmail.connected || disconnectingProvider === "gmail"}
               onSecondaryAction={() => { void disconnectIntegration("gmail"); }}
             />
             <IntegrationCard
@@ -622,7 +627,7 @@ export default function Settings() {
               actionLabel="Coming Soon"
               actionDisabled
               secondaryActionLabel={disconnectingProvider === "outlook" ? "Disconnecting..." : "Disconnect"}
-              secondaryActionDisabled={!integrations.outlook.connected || disconnectingProvider === "outlook"}
+              secondaryActionDisabled={!isWorkspaceAdmin || !integrations.outlook.connected || disconnectingProvider === "outlook"}
               onSecondaryAction={() => { void disconnectIntegration("outlook"); }}
             />
           </div>

@@ -57,23 +57,37 @@ function AuthGuard() {
           signal: controller.signal,
         });
 
-        if (response.status !== 403) return;
-
         const payload = await response.json().catch(() => ({}));
         const message = String(payload?.message || "").toLowerCase();
 
-        if (!message.includes("deactivated") && !message.includes("disabled")) return;
+        if (response.status === 403) {
+          if (!message.includes("deactivated") && !message.includes("disabled")) return;
 
-        localStorage.removeItem("authToken");
-        if (!sessionStorage.getItem("accountDeactivatedToastShown")) {
-          toast({
-            title: "Account deactivated",
-            description: "Your account has been deactivated by an administrator. Please contact your admin.",
-            variant: "destructive",
-          });
-          sessionStorage.setItem("accountDeactivatedToastShown", "1");
+          localStorage.removeItem("authToken");
+          if (!sessionStorage.getItem("accountDeactivatedToastShown")) {
+            toast({
+              title: "Account deactivated",
+              description: "Your account has been deactivated by an administrator. Please contact your admin.",
+              variant: "destructive",
+            });
+            sessionStorage.setItem("accountDeactivatedToastShown", "1");
+          }
+          navigate("/login");
+          return;
         }
-        navigate("/login");
+
+        if (response.status === 401) {
+          localStorage.removeItem("authToken");
+          if (!sessionStorage.getItem("accountDeletedToastShown")) {
+            toast({
+              title: "Account removed",
+              description: "Your account was deleted by an administrator. Please contact your admin.",
+              variant: "destructive",
+            });
+            sessionStorage.setItem("accountDeletedToastShown", "1");
+          }
+          navigate("/login");
+        }
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
       }
