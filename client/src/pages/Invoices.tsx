@@ -318,7 +318,12 @@ export default function Invoices() {
       return;
     }
 
-    toast({ title: editingInvoiceId ? "Invoice updated" : "Invoice created" });
+    toast({
+      title: "🧾 Invoices",
+      description: editingInvoiceId
+        ? `Invoice ${form.invoiceNumber || "-"} has been updated.`
+        : `Invoice ${form.invoiceNumber || "-"} for ${form.clientName || "Unknown customer"} has been generated.`,
+    });
     setShowForm(false);
     setForm(initialForm);
     setEditingInvoiceId(null);
@@ -348,7 +353,11 @@ export default function Invoices() {
       return;
     }
 
-    toast({ title: "Invoice deleted" });
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    toast({
+      title: "🧾 Invoices",
+      description: `Invoice ${invoice?.invoice_number || invoiceId} has been deleted.`,
+    });
     void loadInvoices();
     void loadInsights();
   };

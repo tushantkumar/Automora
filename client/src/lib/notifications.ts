@@ -10,6 +10,10 @@ const CHANGE_EVENT = "app-notifications:changed";
 const LIMIT = 100;
 
 const NOTIFICATION_TITLE_MAP: Record<string, string> = {
+  "⚙️ automations": "⚙️ Automations",
+  "👤 customers": "👤 Customers",
+  "🧾 invoices": "🧾 Invoices",
+  "✉️ mail templates": "✉️ Mail Templates",
   "automation created": "New automation created successfully.",
   "automation updated": "Automation updated successfully.",
   "automation deleted": "Automation deleted successfully.",

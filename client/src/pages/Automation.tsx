@@ -307,10 +307,16 @@ export default function Automation() {
 
       if (editing) {
         await axios.put(`${AUTH_API_URL}/automations/${editing.id}`, payload, { headers });
-        toast({ title: "Automation updated" });
+        toast({
+          title: "⚙️ Automations",
+          description: `Automation "${values.name}" was updated successfully.`,
+        });
       } else {
         await axios.post(`${AUTH_API_URL}/automations`, payload, { headers });
-        toast({ title: "Automation created" });
+        toast({
+          title: "⚙️ Automations",
+          description: `Automation "${values.name}" has been successfully created.`,
+        });
       }
 
       setOpenModal(false);
@@ -325,7 +331,10 @@ export default function Automation() {
     try {
       await axios.delete(`${AUTH_API_URL}/automations/${deleteTarget.id}`, { headers });
       setDeleteTarget(null);
-      toast({ title: "Automation deleted" });
+      toast({
+        title: "⚙️ Automations",
+        description: `Automation "${deleteTarget.name}" has been deleted.`,
+      });
       await loadAutomations(page, appliedSearch);
     } catch (error) {
       toast({ title: "Delete failed", description: (error as Error).message });

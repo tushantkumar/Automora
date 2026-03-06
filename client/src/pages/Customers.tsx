@@ -321,7 +321,12 @@ export default function Customers() {
         return;
       }
 
-      toast({ title: isEditing ? "Customer updated" : "Customer created" });
+      toast({
+        title: "👤 Customers",
+        description: isEditing
+          ? `Profile details for "${form.name}" have been updated.`
+          : `New customer "${form.name}" has been added to the system.`,
+      });
       setShowForm(false);
       setEditingCustomerId(null);
       setForm(initialForm);
@@ -364,7 +369,11 @@ export default function Customers() {
       return;
     }
 
-    toast({ title: "Customer deleted" });
+    const customerName = customers.find((item) => item.id === customerId)?.name || customerId;
+    toast({
+      title: "👤 Customers",
+      description: `Customer "${customerName}" has been permanently removed.`,
+    });
     if (selectedDetail?.customerId === customerId) {
       setSelectedDetail(null);
     }
