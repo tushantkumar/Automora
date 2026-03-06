@@ -2,6 +2,7 @@ import {
   activateInvitedUser,
   changeManagedUserRole,
   disableManagedUser,
+  deleteManagedUser,
   inviteUserForAdmin,
   listUsersForAdmin,
   resendInviteForAdmin,
@@ -40,5 +41,11 @@ export const validateInviteTokenHandler = async (req, res) => {
 
 export const activateInviteHandler = async (req, res) => {
   const result = await activateInvitedUser(req.body || {});
+  return res.status(result.status).json(result.body);
+};
+
+
+export const deleteUserHandler = async (req, res) => {
+  const result = await deleteManagedUser(req.headers.authorization, req.params.userId);
   return res.status(result.status).json(result.body);
 };

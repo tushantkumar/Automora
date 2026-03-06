@@ -35,7 +35,9 @@ const readBearerToken = (authHeader) =>
 const getAuthorizedUser = async (authHeader) => {
   const token = readBearerToken(authHeader);
   if (!token) return null;
-  return getUserBySessionToken(token);
+  const user = await getUserBySessionToken(token);
+  if (!user) return null;
+  return { ...user, actor_user_id: user.id, id: user.workspace_id || user.id };
 };
 
 const encodeState = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");

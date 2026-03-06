@@ -12,6 +12,7 @@ const USER_SELECT = `SELECT
   u.status,
   u.platform_tier,
   u.subscription_plan,
+  u.workspace_id,
   u.role,
   u.invited_by,
   u.invited_at,
@@ -48,9 +49,9 @@ export const createUserWithVerificationToken = async ({ id, name, email, passwor
 
   try {
     const inserted = await pool.query(
-      `INSERT INTO auth_users (id, name, email, password_hash)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at, NULL::TEXT AS organization_name, FALSE AS onboarding_completed`,
+      `INSERT INTO auth_users (id, name, email, password_hash, workspace_id)
+       VALUES ($1, $2, $3, $4, $1)
+       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, workspace_id, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at, NULL::TEXT AS organization_name, FALSE AS onboarding_completed`,
       [id, name, email, passwordHash],
     );
 
@@ -64,14 +65,14 @@ export const createUserWithVerificationToken = async ({ id, name, email, passwor
   }
 };
 
-export const createInvitedUser = async ({ id, name, email, passwordHash, role, invitedBy, invitedAt, invitationAcceptedAt }) => {
+export const createInvitedUser = async ({ id, name, email, passwordHash, role, workspaceId, invitedBy, invitedAt, invitationAcceptedAt }) => {
   const res = await pool.query(
     `INSERT INTO auth_users (
-      id, name, email, password_hash, is_verified, status, role, invited_by, invited_at, invitation_accepted_at, created_at
+      id, name, email, password_hash, is_verified, status, role, workspace_id, invited_by, invited_at, invitation_accepted_at, created_at
     )
-     VALUES ($1, $2, $3, $4, TRUE, 'Active', $5, $6, $7, $8, NOW())
+     VALUES ($1, $2, $3, $4, TRUE, 'Active', $5, $6, $7, $8, $9, NOW())
      RETURNING id`,
-    [id, name, email, passwordHash, role, invitedBy, invitedAt, invitationAcceptedAt],
+    [id, name, email, passwordHash, role, workspaceId, invitedBy, invitedAt, invitationAcceptedAt],
   );
 
   return res.rows[0] ?? null;
@@ -100,6 +101,29 @@ export const disableUserById = async ({ userId, disabled }) => {
   );
 
   return res.rows[0] ?? null;
+};
+
+
+export const listUsersByWorkspaceId = async (workspaceId) => {
+  const res = await pool.query(
+    `SELECT
+      u.id,
+      u.name,
+      u.email,
+      u.role,
+      u.status,
+      u.is_disabled,
+      u.created_at,
+      u.invited_at,
+      u.invitation_accepted_at,
+      u.invited_by
+     FROM auth_users u
+     WHERE u.workspace_id = $1
+     ORDER BY u.created_at ASC`,
+    [workspaceId],
+  );
+
+  return res.rows;
 };
 
 export const listManagedUsers = async (inviterUserId) => {
@@ -255,7 +279,7 @@ export const verifyUserEmailAndCreateSession = async ({ email, verificationToken
       `UPDATE auth_users
        SET is_verified = TRUE
        WHERE email = $1
-       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at`,
+       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, workspace_id, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at`,
       [email],
     );
 
@@ -295,6 +319,7 @@ export const getUserBySessionToken = async (token) => {
       u.status,
       u.platform_tier,
       u.subscription_plan,
+      u.workspace_id,
       u.role,
       u.invited_by,
       u.invited_at,

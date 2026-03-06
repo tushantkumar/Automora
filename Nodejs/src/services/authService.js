@@ -27,6 +27,7 @@ export const publicUser = (user) => ({
   status: String(user.status || "Active"),
   platformTier: String(user.platform_tier || "free"),
   subscriptionPlan: String(user.subscription_plan || "Starter"),
+  workspaceId: user.workspace_id || user.id,
   createdAt: user.created_at,
   isVerified: user.is_verified,
   onboardingCompleted: Boolean(user.onboarding_completed),
@@ -328,6 +329,10 @@ export const requestAccountDeletionOtp = async (authHeader) => {
     return { status: 401, body: { message: "unauthorized" } };
   }
 
+  if (String(user.role || "") !== "Admin") {
+    return { status: 403, body: { message: "only admin can delete accounts" } };
+  }
+
   const otp = generateSixDigitOtp();
   const otpHash = hashPassword(otp);
   const expiresAt = new Date(Date.now() + ACCOUNT_DELETE_OTP_VALIDITY_MINUTES * 60 * 1000);
@@ -358,6 +363,10 @@ export const deleteAccountWithOtp = async (authHeader, payload) => {
 
   if (!user) {
     return { status: 401, body: { message: "unauthorized" } };
+  }
+
+  if (String(user.role || "") !== "Admin") {
+    return { status: 403, body: { message: "only admin can delete accounts" } };
   }
 
   const otp = String(payload?.otp || "").trim();

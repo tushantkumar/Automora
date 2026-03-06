@@ -3,6 +3,7 @@ import {
   activateInviteHandler,
   changeUserRoleHandler,
   disableUserHandler,
+  deleteUserHandler,
   inviteUserHandler,
   listManagedUsersHandler,
   resendInviteHandler,
@@ -16,6 +17,7 @@ userManagementRouter.post("/admin/users/invite", inviteUserHandler);
 userManagementRouter.post("/admin/users/:email/resend-invite", resendInviteHandler);
 userManagementRouter.patch("/admin/users/:userId/role", changeUserRoleHandler);
 userManagementRouter.patch("/admin/users/:userId/disable", disableUserHandler);
+userManagementRouter.delete("/admin/users/:userId", deleteUserHandler);
 userManagementRouter.get("/invites/validate", validateInviteTokenHandler);
 userManagementRouter.post("/invites/activate", activateInviteHandler);
 

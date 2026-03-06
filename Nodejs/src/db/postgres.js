@@ -64,6 +64,8 @@ export const initDatabase = async () => {
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS invited_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS invitation_accepted_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS workspace_id TEXT;`);
+  await pool.query(`UPDATE auth_users SET workspace_id = id WHERE workspace_id IS NULL;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS industry TEXT;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS business_bio TEXT;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS selected_automations JSONB NOT NULL DEFAULT '[]'::jsonb;`);

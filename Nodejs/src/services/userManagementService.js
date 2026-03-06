@@ -11,9 +11,11 @@ import {
   upsertOrganizationNameByUserId,
   listManagedUsers,
   listPendingInvites,
+  listUsersByWorkspaceId,
   markInviteUsed,
   updateUserRoleById,
   upsertInvite,
+  deleteUserAccountById,
 } from "../db/authRepository.js";
 import { APP_BASE_URL } from "../config/constants.js";
 import { createToken, createUserId, hashPassword, normalizeEmail } from "../utils/auth.js";
@@ -105,8 +107,10 @@ export const listUsersForAdmin = async (authHeader) => {
   const permissionError = requireManageUsersPermission(user);
   if (permissionError) return permissionError;
 
-  const [managedUsers, pendingInvites] = await Promise.all([
-    listManagedUsers(user.id),
+  const workspaceId = String(user.workspace_id || user.id);
+
+  const [workspaceUsers, pendingInvites] = await Promise.all([
+    listUsersByWorkspaceId(workspaceId),
     listPendingInvites(user.id),
   ]);
 
@@ -115,7 +119,7 @@ export const listUsersForAdmin = async (authHeader) => {
     body: {
       users: [
         ...pendingInvites.map(toPendingInviteRow),
-        ...managedUsers.map(toManagedUserRow),
+        ...workspaceUsers.map(toManagedUserRow),
       ],
     },
   };
@@ -266,6 +270,24 @@ export const disableManagedUser = async (authHeader, userId, payload) => {
   return { status: 200, body: { message: disabled ? "user disabled" : "user enabled" } };
 };
 
+
+export const deleteManagedUser = async (authHeader, userId) => {
+  const user = await getAuthorizedUser(authHeader);
+  const permissionError = requireManageUsersPermission(user);
+  if (permissionError) return permissionError;
+
+  const target = await getUserById(userId);
+  if (!target) return { status: 404, body: { message: "user not found" } };
+
+  const sameWorkspace = String(target.workspace_id || target.id) === String(user.workspace_id || user.id);
+  if (!sameWorkspace || String(target.id) === String(user.id)) {
+    return { status: 403, body: { message: "forbidden" } };
+  }
+
+  await deleteUserAccountById(target.id);
+  return { status: 200, body: { message: "user deleted" } };
+};
+
 export const validateInviteActivationToken = async (token) => {
   const invite = await getInviteByTokenHash(tokenHash(token));
   if (!invite) return { status: 404, body: { message: "invalid invite token" } };
@@ -313,6 +335,7 @@ export const activateInvitedUser = async ({ token, password, confirmPassword }) 
     email: invite.invited_email,
     passwordHash: hashPassword(password),
     role: invite.role,
+    workspaceId: String(inviter?.workspace_id || inviter?.id || invite.inviter_user_id),
     invitedBy: invite.inviter_user_id,
     invitedAt: invite.created_at || now,
     invitationAcceptedAt: now,

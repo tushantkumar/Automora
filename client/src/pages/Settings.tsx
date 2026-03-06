@@ -411,6 +411,26 @@ export default function Settings() {
 
 
 
+
+  const deleteUser = async (userId: string) => {
+    if (!token) return;
+    try {
+      const response = await fetch(`${AUTH_API_URL}/admin/users/${userId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast({ title: "Unable to delete user", description: data?.message || "Please try again." });
+        return;
+      }
+      toast({ title: "User deleted." });
+      void loadManagedUsers();
+    } catch {
+      toast({ title: "Unable to delete user", description: "Please try again." });
+    }
+  };
+
   const filteredManagedUsers = useMemo(() => managedUsers.filter((user) => {
     const nameOk = userFilter.name.trim() ? user.name.toLowerCase().includes(userFilter.name.trim().toLowerCase()) : true;
     const emailOk = userFilter.email.trim() ? user.email.toLowerCase().includes(userFilter.email.trim().toLowerCase()) : true;
@@ -491,12 +511,20 @@ export default function Settings() {
           <Card className="border-destructive/20 bg-destructive/5">
             <CardHeader>
               <CardTitle className="text-destructive">Danger Zone</CardTitle>
-              <CardDescription>Delete account requires OTP verification sent to your registered email.</CardDescription>
+              <CardDescription>
+                {profile.role === "Admin"
+                  ? "Delete account requires OTP verification sent to your registered email."
+                  : "Only workspace admin can delete accounts."}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button variant="destructive" className="gap-2" onClick={() => setConfirmDeleteOpen(true)}>
-                <Trash2 className="w-4 h-4" /> Delete Account
-              </Button>
+              {profile.role === "Admin" ? (
+                <Button variant="destructive" className="gap-2" onClick={() => setConfirmDeleteOpen(true)}>
+                  <Trash2 className="w-4 h-4" /> Delete Account
+                </Button>
+              ) : (
+                <p className="text-sm text-muted-foreground">Please contact your admin for account deletion.</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -567,6 +595,7 @@ export default function Settings() {
                       <option value="Viewer">Viewer</option>
                       <option value="Editor">Editor</option>
                       <option value="Author">Author</option>
+                      <option value="Admin">Admin</option>
                     </select>
                   </div>
 
@@ -592,7 +621,7 @@ export default function Settings() {
                             <TableCell>{user.name}</TableCell>
                             <TableCell>{user.email}</TableCell>
                             <TableCell>
-                              {user.status !== "Pending" && user.status !== "Expired" ? (
+                              {user.status !== "Pending" && user.status !== "Expired" && user.role !== "Admin" ? (
                                 <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={user.role} onChange={(event) => { void changeUserRole(user.id, event.target.value); }}>
                                   <option value="Viewer">Viewer</option>
                                   <option value="Editor">Editor</option>
@@ -605,10 +634,15 @@ export default function Settings() {
                             <TableCell className="text-right">
                               {user.status === "Pending" || user.status === "Expired" ? (
                                 <Button variant="outline" size="sm" onClick={() => { void resendInvite(user.email); }}>Resend Invite</Button>
+                              ) : user.role === "Admin" ? (
+                                <span className="text-xs text-muted-foreground">Workspace Admin</span>
                               ) : (
-                                <Button variant={user.isDisabled ? "default" : "destructive"} size="sm" onClick={() => { void disableUser(user.id, !user.isDisabled); }}>
-                                  {user.isDisabled ? "Enable User" : "Disable User"}
-                                </Button>
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button variant={user.isDisabled ? "default" : "destructive"} size="sm" onClick={() => { void disableUser(user.id, !user.isDisabled); }}>
+                                    {user.isDisabled ? "Enable User" : "Deactivate"}
+                                  </Button>
+                                  <Button variant="destructive" size="sm" onClick={() => { void deleteUser(user.id); }}>Delete</Button>
+                                </div>
                               )}
                             </TableCell>
                           </TableRow>
