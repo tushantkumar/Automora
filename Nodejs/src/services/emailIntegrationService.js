@@ -21,7 +21,7 @@ import {
   OLLAMA_BASE_URL,
   OLLAMA_MODEL,
 } from "../config/constants.js";
-import { canCreateResources, canSendMail, canUploadResources } from "./rbacService.js";
+import { APP_ROLES, canCreateResources, canSendMail, canUploadResources } from "./rbacService.js";
 
 const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -771,7 +771,9 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
 export const disconnectEmailIntegration = async (authHeader, provider = "") => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
-  if (!canCreateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+  if (String(user.role || "") !== APP_ROLES.ADMIN) {
+    return { status: 403, body: { message: "only workspace admin can disconnect integrations" } };
+  }
 
 
   const normalizedProvider = String(provider || "").trim().toLowerCase();

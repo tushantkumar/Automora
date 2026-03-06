@@ -392,15 +392,13 @@ export const activateInvitedUser = async ({ token, password, confirmPassword }) 
   const sessionToken = createToken();
   await createSession({ token: sessionToken, userId: created.id });
 
-  const onboardingRequired = String(invite.role || "") === APP_ROLES.AUTHOR;
-
   return {
     status: 200,
     body: {
       message: "account activated",
       token: sessionToken,
-      onboardingRequired,
-      redirectTo: onboardingRequired ? "/onboarding" : "/dashboard",
+      onboardingRequired: false,
+      redirectTo: "/dashboard",
     },
   };
 };
