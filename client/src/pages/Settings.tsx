@@ -338,14 +338,25 @@ export default function Settings() {
       });
       const data = await response.json();
       if (!response.ok) {
-        toast({ title: "Unable to invite user", description: data?.message || "Please try again." });
+        toast({
+          title: "Invite could not be sent",
+          description: data?.message || `We couldn't send an invitation to ${payload.email}. Please try again.`,
+          variant: "destructive",
+        });
         return;
       }
-      toast({ title: "Invite sent successfully." });
+      toast({
+        title: "Invitation sent",
+        description: `An invite email has been sent to ${payload.email} with a 24-hour activation link.`,
+      });
       setInviteForm({ name: "", email: "", role: "Viewer" });
       void loadManagedUsers();
     } catch {
-      toast({ title: "Unable to invite user", description: "Please try again." });
+      toast({
+        title: "Invite could not be sent",
+        description: `We couldn't send an invitation to ${payload.email}. Please try again.`,
+        variant: "destructive",
+      });
     } finally {
       setInvitingUser(false);
     }
@@ -415,19 +426,30 @@ export default function Settings() {
       });
       const data = await response.json();
       if (!response.ok) {
-        toast({ title: "Unable to update user", description: data?.message || "Please try again." });
+        toast({
+          title: disabled ? "Deactivation failed" : "User enable failed",
+          description: data?.message || "Please try again.",
+          variant: "destructive",
+        });
         return;
       }
 
       if (disabled) {
-        toast({ title: "User deactivated." });
+        toast({
+          title: "User deactivated",
+          description: `${deactivateTargetUser?.name || "Selected user"} has been deactivated and can no longer access the workspace.`,
+        });
         setDeactivateDialogOpen(false);
         setDeactivateTargetUser(null);
       }
 
       void loadManagedUsers();
     } catch {
-      toast({ title: "Unable to update user", description: "Please try again." });
+      toast({
+        title: disabled ? "Deactivation failed" : "User enable failed",
+        description: "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       if (disabled) {
         setDeactivatingManagedUser(false);
@@ -454,15 +476,26 @@ export default function Settings() {
       });
       const data = await response.json();
       if (!response.ok) {
-        toast({ title: "Unable to delete user", description: data?.message || "Please try again." });
+        toast({
+          title: "User deletion failed",
+          description: data?.message || `We couldn't delete ${deleteTargetUser.email}. Please try again.`,
+          variant: "destructive",
+        });
         return;
       }
-      toast({ title: "User deleted." });
+      toast({
+        title: "User deleted",
+        description: `${deleteTargetUser.name} (${deleteTargetUser.email}) has been permanently removed from this workspace.`,
+      });
       setDeleteUserDialogOpen(false);
       setDeleteTargetUser(null);
       void loadManagedUsers();
     } catch {
-      toast({ title: "Unable to delete user", description: "Please try again." });
+      toast({
+        title: "User deletion failed",
+        description: deleteTargetUser ? `We couldn't delete ${deleteTargetUser.email}. Please try again.` : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setDeletingManagedUser(false);
     }
