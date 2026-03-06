@@ -618,7 +618,7 @@ export const sendInvoiceEmailForUser = async (authHeader, invoiceId) => {
   const result = await sendGmailEmail(authHeader, {
     to: customerEmail,
     subject: `Invoice ${invoiceNumber} from ${String(user?.organization_name || user?.name || "your company")}`.trim(),
-    body: `Hi ${clientName},\n\nPlease find your invoice ${invoiceNumber} attached as PDF.\n\nThank you.`,
+    body: `Hi ${clientName},\n\nPlease find your invoice ${invoiceNumber} attached as a PDF file.\n\nThank you.`,
     attachments: [{
       filename: `invoice-${invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`,
       contentType: "application/pdf",

@@ -128,6 +128,14 @@ const toBase64Chunks = (value, size = 76) => {
   return chunks.join("\r\n");
 };
 
+const normalizeBase64Attachment = (value) => {
+  const input = String(value || "").trim();
+  if (!input) return "";
+
+  const withoutPrefix = input.includes(",") ? input.split(",").pop() || "" : input;
+  return withoutPrefix.replace(/\s+/g, "");
+};
+
 const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachments = [] }) => {
   const safeTo = String(to || "").trim();
   const safeSubject = String(subject || "").trim() || "(no subject)";
@@ -135,7 +143,14 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachmen
   const safeInReplyTo = String(inReplyTo || "").trim();
   const safeReferences = String(references || "").trim();
 
-  const safeAttachments = Array.isArray(attachments) ? attachments.filter((item) => String(item?.contentBase64 || "").trim()) : [];
+  const safeAttachments = Array.isArray(attachments)
+    ? attachments
+      .map((item) => ({
+        ...item,
+        contentBase64: normalizeBase64Attachment(item?.contentBase64 || ""),
+      }))
+      .filter((item) => item.contentBase64)
+    : [];
   const headers = [
     `To: ${safeTo}`,
     "MIME-Version: 1.0",
@@ -146,7 +161,7 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachmen
   if (safeReferences) headers.push(`References: ${safeReferences}`);
 
   if (safeAttachments.length === 0) {
-    headers.push("Content-Type: text/plain; charset=utf-8");
+    headers.push("Content-Type: text/plain; charset=\"UTF-8\"");
     return [...headers, "", safeBody].join("\r\n");
   }
 
@@ -155,7 +170,7 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachmen
 
   const parts = [
     `--${boundary}`,
-    "Content-Type: text/plain; charset=utf-8",
+    "Content-Type: text/plain; charset=\"UTF-8\"",
     "Content-Transfer-Encoding: 7bit",
     "",
     safeBody,
@@ -642,7 +657,7 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
       .map((item) => ({
         filename: String(item?.filename || "attachment.bin").trim(),
         contentType: String(item?.contentType || "application/octet-stream").trim(),
-        contentBase64: String(item?.contentBase64 || "").trim(),
+        contentBase64: normalizeBase64Attachment(item?.contentBase64 || ""),
       }))
       .filter((item) => item.contentBase64)
     : [];
