@@ -11,6 +11,7 @@ import {
   updateAutomationById,
 } from "../db/automationRepository.js";
 import { listMailTemplatesByUserId } from "../db/mailTemplateRepository.js";
+import { canDeleteResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -284,6 +285,7 @@ export const updateAutomationForUser = async (authHeader, automationId, payload)
 export const deleteAutomationForUser = async (authHeader, automationId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canDeleteResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const deleted = await deleteAutomationById({ automationId, userId: user.id });
   if (!deleted) return { status: 404, body: { message: "automation not found" } };

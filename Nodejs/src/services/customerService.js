@@ -11,6 +11,7 @@ import {
 import { createUserId, normalizeEmail } from "../utils/auth.js";
 import { countInvoicesByCustomerId, listInvoicesByCustomerId } from "../db/invoiceRepository.js";
 import { runAutomations } from "./automation/executionEngine.js";
+import { canDeleteResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -380,6 +381,7 @@ export const updateCustomerForUser = async (authHeader, customerId, payload) => 
 export const deleteCustomerForUser = async (authHeader, customerId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canDeleteResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const invoiceCount = await countInvoicesByCustomerId({ userId: user.id, customerId });
   if (invoiceCount > 0) {

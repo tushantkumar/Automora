@@ -16,6 +16,7 @@ import { createUserId } from "../utils/auth.js";
 import { getCustomerByEmail, getCustomerById, setCustomerRevenueById } from "../db/customerRepository.js";
 import { processInvoiceStatusChangeAutomations } from "./invoiceWorkflowAutomationService.js";
 import { sendGmailEmail } from "./emailIntegrationService.js";
+import { canDeleteResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -398,6 +399,7 @@ export const updateInvoiceForUser = async (authHeader, invoiceId, payload) => {
 export const deleteInvoiceForUser = async (authHeader, invoiceId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canDeleteResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const existingInvoice = await getInvoiceById({ invoiceId, userId: user.id });
   if (!existingInvoice) return { status: 404, body: { message: "invoice not found" } };

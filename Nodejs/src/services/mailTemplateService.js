@@ -6,6 +6,7 @@ import {
   updateMailTemplateById,
 } from "../db/mailTemplateRepository.js";
 import { createUserId } from "../utils/auth.js";
+import { canDeleteResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -71,6 +72,7 @@ export const updateMailTemplateForUser = async (authHeader, templateId, payload)
 export const deleteMailTemplateForUser = async (authHeader, templateId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canDeleteResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const deleted = await deleteMailTemplateById({ templateId, userId: user.id });
   if (!deleted) return { status: 404, body: { message: "mail template not found" } };

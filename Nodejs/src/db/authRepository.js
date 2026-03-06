@@ -12,9 +12,14 @@ const USER_SELECT = `SELECT
   u.status,
   u.platform_tier,
   u.subscription_plan,
+  u.role,
+  u.invited_by,
+  u.invited_at,
+  u.invitation_accepted_at,
+  u.is_disabled,
   u.created_at,
   o.organization_name,
-  EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) AS onboarding_completed
+  (u.invited_by IS NOT NULL OR EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id)) AS onboarding_completed
 FROM auth_users u
 LEFT JOIN auth_onboarding_details o ON o.user_id = u.id`;
 
@@ -28,6 +33,16 @@ export const getUserByEmail = async (email) => {
   return res.rows[0] ?? null;
 };
 
+export const getUserById = async (userId) => {
+  const res = await pool.query(
+    `${USER_SELECT}
+     WHERE u.id = $1`,
+    [userId],
+  );
+
+  return res.rows[0] ?? null;
+};
+
 export const createUserWithVerificationToken = async ({ id, name, email, passwordHash, verificationToken }) => {
   await pool.query("BEGIN");
 
@@ -35,7 +50,7 @@ export const createUserWithVerificationToken = async ({ id, name, email, passwor
     const inserted = await pool.query(
       `INSERT INTO auth_users (id, name, email, password_hash)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, created_at, NULL::TEXT AS organization_name, FALSE AS onboarding_completed`,
+       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at, NULL::TEXT AS organization_name, FALSE AS onboarding_completed`,
       [id, name, email, passwordHash],
     );
 
@@ -47,6 +62,171 @@ export const createUserWithVerificationToken = async ({ id, name, email, passwor
     await pool.query("ROLLBACK");
     throw error;
   }
+};
+
+export const createInvitedUser = async ({ id, name, email, passwordHash, role, invitedBy, invitedAt, invitationAcceptedAt }) => {
+  const res = await pool.query(
+    `INSERT INTO auth_users (
+      id, name, email, password_hash, is_verified, status, role, invited_by, invited_at, invitation_accepted_at, created_at
+    )
+     VALUES ($1, $2, $3, $4, TRUE, 'Active', $5, $6, $7, $8, NOW())
+     RETURNING id`,
+    [id, name, email, passwordHash, role, invitedBy, invitedAt, invitationAcceptedAt],
+  );
+
+  return res.rows[0] ?? null;
+};
+
+export const updateUserRoleById = async ({ userId, role }) => {
+  const res = await pool.query(
+    `UPDATE auth_users
+     SET role = $2
+     WHERE id = $1
+     RETURNING id, role`,
+    [userId, role],
+  );
+
+  return res.rows[0] ?? null;
+};
+
+export const disableUserById = async ({ userId, disabled }) => {
+  const res = await pool.query(
+    `UPDATE auth_users
+     SET is_disabled = $2,
+         status = CASE WHEN $2 THEN 'Disabled' ELSE 'Active' END
+     WHERE id = $1
+     RETURNING id, is_disabled, status`,
+    [userId, disabled],
+  );
+
+  return res.rows[0] ?? null;
+};
+
+export const listManagedUsers = async (inviterUserId) => {
+  const res = await pool.query(
+    `SELECT
+      u.id,
+      u.name,
+      u.email,
+      u.role,
+      u.status,
+      u.is_disabled,
+      u.created_at,
+      u.invited_at,
+      u.invitation_accepted_at
+     FROM auth_users u
+     WHERE u.invited_by = $1
+     ORDER BY COALESCE(u.invited_at, u.created_at) DESC`,
+    [inviterUserId],
+  );
+
+  return res.rows;
+};
+
+export const listPendingInvites = async (inviterUserId) => {
+  const res = await pool.query(
+    `SELECT
+      id,
+      invited_name,
+      invited_email,
+      role,
+      expires_at,
+      created_at,
+      used_at,
+      disabled_at,
+      last_sent_at,
+      expires_at < NOW() AS is_expired
+     FROM auth_user_invites
+     WHERE inviter_user_id = $1
+       AND used_at IS NULL
+       AND disabled_at IS NULL
+     ORDER BY created_at DESC`,
+    [inviterUserId],
+  );
+
+  return res.rows;
+};
+
+export const upsertInvite = async ({ id, inviterUserId, invitedName, invitedEmail, role, tokenHash, expiresAt }) => {
+  const res = await pool.query(
+    `INSERT INTO auth_user_invites (
+      id, inviter_user_id, invited_name, invited_email, role, token_hash, expires_at, created_at, last_sent_at
+    )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+     ON CONFLICT (inviter_user_id, invited_email)
+     DO UPDATE SET
+       invited_name = EXCLUDED.invited_name,
+       role = EXCLUDED.role,
+       token_hash = EXCLUDED.token_hash,
+       expires_at = EXCLUDED.expires_at,
+       used_at = NULL,
+       disabled_at = NULL,
+       last_sent_at = NOW()
+     RETURNING id, inviter_user_id, invited_name, invited_email, role, expires_at, created_at, used_at, disabled_at, last_sent_at`,
+    [id, inviterUserId, invitedName, invitedEmail, role, tokenHash, expiresAt],
+  );
+
+  return res.rows[0] ?? null;
+};
+
+export const getInviteByTokenHash = async (tokenHash) => {
+  const res = await pool.query(
+    `SELECT
+      id,
+      inviter_user_id,
+      invited_name,
+      invited_email,
+      role,
+      token_hash,
+      expires_at,
+      created_at,
+      used_at,
+      disabled_at,
+      last_sent_at,
+      expires_at < NOW() AS is_expired
+     FROM auth_user_invites
+     WHERE token_hash = $1`,
+    [tokenHash],
+  );
+
+  return res.rows[0] ?? null;
+};
+
+export const getInviteByEmail = async ({ inviterUserId, invitedEmail }) => {
+  const res = await pool.query(
+    `SELECT
+      id,
+      inviter_user_id,
+      invited_name,
+      invited_email,
+      role,
+      token_hash,
+      expires_at,
+      created_at,
+      used_at,
+      disabled_at,
+      last_sent_at,
+      expires_at < NOW() AS is_expired
+     FROM auth_user_invites
+     WHERE inviter_user_id = $1
+       AND invited_email = $2
+       AND used_at IS NULL
+       AND disabled_at IS NULL
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [inviterUserId, invitedEmail],
+  );
+
+  return res.rows[0] ?? null;
+};
+
+export const markInviteUsed = async (inviteId) => {
+  await pool.query(
+    `UPDATE auth_user_invites
+     SET used_at = NOW()
+     WHERE id = $1`,
+    [inviteId],
+  );
 };
 
 export const deleteUserByEmail = async (email) => {
@@ -75,7 +255,7 @@ export const verifyUserEmailAndCreateSession = async ({ email, verificationToken
       `UPDATE auth_users
        SET is_verified = TRUE
        WHERE email = $1
-       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, created_at`,
+       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at`,
       [email],
     );
 
@@ -115,9 +295,14 @@ export const getUserBySessionToken = async (token) => {
       u.status,
       u.platform_tier,
       u.subscription_plan,
+      u.role,
+      u.invited_by,
+      u.invited_at,
+      u.invitation_accepted_at,
+      u.is_disabled,
       u.created_at,
       o.organization_name,
-      EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) AS onboarding_completed
+      (u.invited_by IS NOT NULL OR EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id)) AS onboarding_completed
      FROM auth_sessions s
      JOIN auth_users u ON s.user_id = u.id
      LEFT JOIN auth_onboarding_details o ON o.user_id = u.id
@@ -254,7 +439,6 @@ export const getOnboardingDetailsByUserId = async (userId) => {
   return res.rows[0] ?? null;
 };
 
-
 export const listUsersForAutomation = async () => {
   const res = await pool.query(
     `SELECT
@@ -264,12 +448,12 @@ export const listUsersForAutomation = async () => {
       o.organization_name
      FROM auth_users u
      LEFT JOIN auth_onboarding_details o ON o.user_id = u.id
-     WHERE u.is_verified = TRUE`,
+     WHERE u.is_verified = TRUE
+       AND u.is_disabled = FALSE`,
   );
 
   return res.rows;
 };
-
 
 export const upsertAccountDeleteOtp = async ({ userId, otpHash, expiresAt }) => {
   await pool.query(

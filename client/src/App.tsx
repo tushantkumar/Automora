@@ -10,6 +10,7 @@ import Auth from "@/pages/Auth";
 import VerifyEmail from "@/pages/VerifyEmail";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
+import ActivateAccount from "@/pages/ActivateAccount";
 import Onboarding from "@/pages/Onboarding";
 import Dashboard from "@/pages/Dashboard";
 import Inbox from "@/pages/Inbox";
@@ -19,7 +20,7 @@ import Settings from "@/pages/Settings";
 import MailTemplates from "@/pages/MailTemplates";
 import Automation from "@/pages/Automation";
 
-const PUBLIC_ROUTES = new Set(["/", "/login", "/signup", "/verify-email", "/forgot-password", "/reset-password"]);
+const PUBLIC_ROUTES = new Set(["/", "/login", "/signup", "/verify-email", "/forgot-password", "/reset-password", "/activate-account"]);
 
 function AuthGuard() {
   const [location, navigate] = useLocation();
@@ -52,6 +53,7 @@ function Router() {
         <Route path="/verify-email" component={VerifyEmail} />
         <Route path="/forgot-password" component={ForgotPassword} />
         <Route path="/reset-password" component={ResetPassword} />
+        <Route path="/activate-account" component={ActivateAccount} />
         <Route path="/onboarding" component={Onboarding} />
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/inbox" component={Inbox} />

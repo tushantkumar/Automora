@@ -31,6 +31,8 @@ export const publicUser = (user) => ({
   isVerified: user.is_verified,
   onboardingCompleted: Boolean(user.onboarding_completed),
   organizationName: user.organization_name || null,
+  role: user.role || "Admin",
+  isDisabled: Boolean(user.is_disabled),
 });
 
 export const signup = async ({ name, email, password }) => {
@@ -281,6 +283,10 @@ export const login = async ({ email, password }) => {
 
   if (!user || !verifyPassword(password, user.password_hash)) {
     return { status: 401, body: { message: "invalid email or password" } };
+  }
+
+  if (user.is_disabled) {
+    return { status: 403, body: { message: "account is disabled" } };
   }
 
   if (!user.is_verified) {
