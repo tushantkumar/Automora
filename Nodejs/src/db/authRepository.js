@@ -18,6 +18,8 @@ const USER_SELECT = `SELECT
   u.invited_at,
   u.invitation_accepted_at,
   u.is_disabled,
+  u.trial_started_at,
+  u.trial_ends_at,
   u.created_at,
   o.organization_name,
   CASE WHEN u.role = 'Author' THEN EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) ELSE (u.invited_by IS NOT NULL OR EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id)) END AS onboarding_completed
@@ -44,15 +46,15 @@ export const getUserById = async (userId) => {
   return res.rows[0] ?? null;
 };
 
-export const createUserWithVerificationToken = async ({ id, name, email, passwordHash, verificationToken }) => {
+export const createUserWithVerificationToken = async ({ id, name, email, passwordHash, verificationToken, subscriptionPlan }) => {
   await pool.query("BEGIN");
 
   try {
     const inserted = await pool.query(
-      `INSERT INTO auth_users (id, name, email, password_hash, workspace_id)
-       VALUES ($1, $2, $3, $4, $1)
-       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, workspace_id, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at, NULL::TEXT AS organization_name, FALSE AS onboarding_completed`,
-      [id, name, email, passwordHash],
+      `INSERT INTO auth_users (id, name, email, password_hash, workspace_id, subscription_plan, trial_started_at, trial_ends_at)
+       VALUES ($1, $2, $3, $4, $1, $5, NOW(), NOW() + INTERVAL '15 days')
+       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, workspace_id, role, invited_by, invited_at, invitation_accepted_at, is_disabled, trial_started_at, trial_ends_at, created_at, NULL::TEXT AS organization_name, FALSE AS onboarding_completed`,
+      [id, name, email, passwordHash, subscriptionPlan],
     );
 
     await pool.query("INSERT INTO auth_verification_tokens (token, email) VALUES ($1, $2)", [verificationToken, email]);
@@ -104,6 +106,22 @@ export const disableUserById = async ({ userId, disabled }) => {
 };
 
 
+export const disableExpiredTrialUserById = async (userId) => {
+  const res = await pool.query(
+    `UPDATE auth_users
+     SET is_disabled = TRUE,
+         status = 'Disabled'
+     WHERE id = $1
+       AND is_disabled = FALSE
+       AND trial_ends_at IS NOT NULL
+       AND trial_ends_at <= NOW()
+     RETURNING id, is_disabled, status`,
+    [userId],
+  );
+
+  return res.rows[0] ?? null;
+};
+
 export const listUsersByWorkspaceId = async (workspaceId) => {
   const res = await pool.query(
     `SELECT
@@ -113,6 +131,8 @@ export const listUsersByWorkspaceId = async (workspaceId) => {
       u.role,
       u.status,
       u.is_disabled,
+      u.trial_started_at,
+      u.trial_ends_at,
       u.created_at,
       u.invited_at,
       u.invitation_accepted_at,
@@ -135,6 +155,8 @@ export const listManagedUsers = async (inviterUserId) => {
       u.role,
       u.status,
       u.is_disabled,
+      u.trial_started_at,
+      u.trial_ends_at,
       u.created_at,
       u.invited_at,
       u.invitation_accepted_at
@@ -279,7 +301,7 @@ export const verifyUserEmailAndCreateSession = async ({ email, verificationToken
       `UPDATE auth_users
        SET is_verified = TRUE
        WHERE email = $1
-       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, workspace_id, role, invited_by, invited_at, invitation_accepted_at, is_disabled, created_at`,
+       RETURNING id, name, email, is_verified, status, platform_tier, subscription_plan, workspace_id, role, invited_by, invited_at, invitation_accepted_at, is_disabled, trial_started_at, trial_ends_at, created_at`,
       [email],
     );
 
@@ -325,6 +347,8 @@ export const getUserBySessionToken = async (token) => {
       u.invited_at,
       u.invitation_accepted_at,
       u.is_disabled,
+      u.trial_started_at,
+      u.trial_ends_at,
       u.created_at,
       o.organization_name,
       CASE WHEN u.role = 'Author' THEN EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id) ELSE (u.invited_by IS NOT NULL OR EXISTS (SELECT 1 FROM auth_onboarding_details od WHERE od.user_id = u.id)) END AS onboarding_completed

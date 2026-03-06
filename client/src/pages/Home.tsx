@@ -1,4 +1,4 @@
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { ArrowRight, BadgeCheck, BarChart3, Bot, FileText, Mail, ShieldCheck, Sparkles, Users, Workflow } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -86,9 +86,19 @@ const billingPlans: readonly BillingPlan[] = [
 type BillingPlanId = (typeof billingPlans)[number]["id"];
 
 export default function Home() {
+  const [, navigate] = useLocation();
   const [selectedPlan, setSelectedPlan] = useState<BillingPlanId | null>(null);
 
   const signupUrl = useMemo(() => (selectedPlan ? `/signup?plan=${selectedPlan}` : "/signup"), [selectedPlan]);
+
+  const continueToSignup = () => {
+    if (!selectedPlan) {
+      document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    navigate(signupUrl);
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -105,7 +115,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <Link href="/login"><Button variant="ghost">Login</Button></Link>
-            <Link href={signupUrl}><Button>Start Free</Button></Link>
+            <Button onClick={continueToSignup}>Start Free</Button>
           </div>
         </div>
       </header>
@@ -128,11 +138,9 @@ export default function Home() {
               </p>
 
               <div className="mt-8 flex flex-wrap gap-3">
-                <Link href={signupUrl}>
-                  <Button size="lg" className="gap-2">
-                    Create Workspace <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </Link>
+                <Button size="lg" className="gap-2" onClick={continueToSignup}>
+                  Create Workspace <ArrowRight className="h-4 w-4" />
+                </Button>
                 <Link href="/login"><Button size="lg" variant="outline">Go to Login</Button></Link>
               </div>
             </div>
@@ -223,11 +231,9 @@ export default function Home() {
             </div>
 
             <div className="mt-8 text-center">
-              <Link href={signupUrl}>
-                <Button size="lg" disabled={!selectedPlan} className="gap-2">
-                  Continue with selected plan <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+              <Button size="lg" disabled={!selectedPlan} className="gap-2" onClick={continueToSignup}>
+                Continue with selected plan <ArrowRight className="h-4 w-4" />
+              </Button>
               {!selectedPlan ? (
                 <p className="mt-3 text-sm text-muted-foreground">Please select one billing plan to continue.</p>
               ) : (
@@ -244,7 +250,7 @@ export default function Home() {
               From invitation-based onboarding to role-driven permissions and immediate deactivation enforcement, Automora keeps collaboration productive and controlled.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link href={signupUrl}><Button className="gap-2">Launch your workspace <ArrowRight className="h-4 w-4" /></Button></Link>
+              <Button className="gap-2" onClick={continueToSignup}>Launch your workspace <ArrowRight className="h-4 w-4" /></Button>
               <Link href="/login"><Button variant="secondary">I already have an account</Button></Link>
             </div>
           </div>
