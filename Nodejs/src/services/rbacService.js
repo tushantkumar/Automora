@@ -3,6 +3,7 @@ export const APP_ROLES = {
   VIEWER: "Viewer",
   EDITOR: "Editor",
   OWNER: "Owner",
+  AUTHOR: "Author",
 };
 
 const ROLE_SET = new Set(Object.values(APP_ROLES));
@@ -22,5 +23,5 @@ export const canDeleteResources = (role) => {
 
 export const canModifyResources = (role) => {
   const normalized = normalizeRole(role);
-  return normalized === APP_ROLES.ADMIN || normalized === APP_ROLES.OWNER || normalized === APP_ROLES.EDITOR;
+  return normalized === APP_ROLES.ADMIN || normalized === APP_ROLES.OWNER || normalized === APP_ROLES.EDITOR || normalized === APP_ROLES.AUTHOR;
 };

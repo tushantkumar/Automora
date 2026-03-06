@@ -83,7 +83,7 @@ export default function ActivateAccount() {
       }
 
       toast({ title: "Account activated successfully." });
-      navigate("/dashboard");
+      navigate(String(data?.redirectTo || "/dashboard"));
     } catch {
       toast({ title: "Unable to activate account" });
     } finally {

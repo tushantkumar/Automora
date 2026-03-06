@@ -17,7 +17,7 @@ import {
 import { APP_BASE_URL } from "../config/constants.js";
 import { createToken, createUserId, hashPassword, normalizeEmail } from "../utils/auth.js";
 import { APP_ROLES, canManageUsers, normalizeRole } from "./rbacService.js";
-import { sendUserInvitationEmail } from "./emailService.js";
+import { sendGmailEmail } from "./emailIntegrationService.js";
 
 const INVITE_EXPIRY_HOURS = 24;
 const INVITE_EXPIRY_MS = INVITE_EXPIRY_HOURS * 60 * 60 * 1000;
@@ -36,6 +36,30 @@ const getAuthorizedUser = async (authHeader) => {
 };
 
 const tokenHash = (value) => crypto.createHash("sha256").update(String(value || "")).digest("hex");
+
+const sendInviteMessage = async ({ authHeader, inviteeEmail, inviterName, inviteeName, role, activationLink }) => {
+  const subject = "You're invited to Automora";
+  const text = [
+    `Hi ${inviteeName || "there"},`,
+    "",
+    `${inviterName || "An admin"} invited you to Automora as ${role}.`,
+    `Activate your account using this secure link: ${activationLink}`,
+    `This link expires in ${INVITE_EXPIRY_HOURS} hours.`,
+    "",
+    "If you were not expecting this invitation, you can ignore this email.",
+  ].join("\n");
+
+  const gmailResult = await sendGmailEmail(authHeader, {
+    to: inviteeEmail,
+    subject,
+    body: text,
+  });
+
+  if (gmailResult.status !== 200) {
+    throw new Error(String(gmailResult?.body?.message || "Admin Gmail is not connected"));
+  }
+};
+
 
 const enforceInviteRateLimit = (userId) => {
   const now = Date.now();
@@ -134,14 +158,18 @@ export const inviteUserForAdmin = async (authHeader, payload) => {
 
   const activationLink = `${APP_BASE_URL}/activate-account?token=${rawToken}`;
 
-  await sendUserInvitationEmail({
-    userEmail: email,
-    inviterName: user.name,
-    inviteeName: name,
-    role,
-    activationLink,
-    expiresInHours: INVITE_EXPIRY_HOURS,
-  });
+  try {
+    await sendInviteMessage({
+      authHeader,
+      inviteeEmail: email,
+      inviterName: user.name,
+      inviteeName: name,
+      role,
+      activationLink,
+    });
+  } catch (error) {
+    return { status: 502, body: { message: String(error?.message || "Unable to send invite via connected admin Gmail") } };
+  }
 
   return {
     status: 201,
@@ -187,14 +215,18 @@ export const resendInviteForAdmin = async (authHeader, email) => {
 
   const activationLink = `${APP_BASE_URL}/activate-account?token=${rawToken}`;
 
-  await sendUserInvitationEmail({
-    userEmail: normalizedEmail,
-    inviterName: user.name,
-    inviteeName: invite.invited_name,
-    role: invite.role,
-    activationLink,
-    expiresInHours: INVITE_EXPIRY_HOURS,
-  });
+  try {
+    await sendInviteMessage({
+      authHeader,
+      inviteeEmail: normalizedEmail,
+      inviterName: user.name,
+      inviteeName: invite.invited_name,
+      role: invite.role,
+      activationLink,
+    });
+  } catch (error) {
+    return { status: 502, body: { message: String(error?.message || "Unable to resend invite via connected admin Gmail") } };
+  }
 
   return { status: 200, body: { message: "invite resent" } };
 };
@@ -289,11 +321,15 @@ export const activateInvitedUser = async ({ token, password, confirmPassword }) 
   const sessionToken = createToken();
   await createSession({ token: sessionToken, userId: created.id });
 
+  const onboardingRequired = String(invite.role || "") === APP_ROLES.AUTHOR;
+
   return {
     status: 200,
     body: {
       message: "account activated",
       token: sessionToken,
+      onboardingRequired,
+      redirectTo: onboardingRequired ? "/onboarding" : "/dashboard",
     },
   };
 };

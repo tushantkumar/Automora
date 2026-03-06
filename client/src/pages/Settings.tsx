@@ -36,6 +36,7 @@ type ProfileState = {
   platformTier: string;
   subscriptionPlan: string;
   role: string;
+  companyName: string;
 };
 
 type IntegrationState = {
@@ -61,6 +62,7 @@ const initialProfile: ProfileState = {
   platformTier: "free",
   subscriptionPlan: "Starter",
   role: "Viewer",
+  companyName: "",
 };
 
 export default function Settings() {
@@ -137,6 +139,7 @@ export default function Settings() {
         platformTier: String(meData?.user?.platformTier || "free"),
         subscriptionPlan: String(meData?.user?.subscriptionPlan || "Starter"),
         role: String(meData?.user?.role || "Viewer"),
+        companyName: String(meData?.user?.organizationName || ""),
       });
     } catch {
       toast({ title: "Unable to load profile details.", description: "Please try again." });
@@ -436,6 +439,10 @@ export default function Settings() {
                 </div>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="company-name">Company Name</Label>
+                <Input id="company-name" value={profile.companyName || "-"} readOnly disabled />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="role">Role</Label>
                 <Input id="role" value={profile.role} readOnly disabled />
               </div>
@@ -529,7 +536,7 @@ export default function Settings() {
                   <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={inviteForm.role} onChange={(event) => setInviteForm((prev) => ({ ...prev, role: event.target.value }))}>
                     <option value="Viewer">Viewer</option>
                     <option value="Editor">Editor</option>
-                    <option value="Owner">Owner</option>
+                    <option value="Author">Author</option>
                   </select>
                   <Button onClick={() => { void inviteUser(); }} disabled={invitingUser}>{invitingUser ? "Sending..." : "Send Invite"}</Button>
                 </CardContent>
@@ -560,7 +567,7 @@ export default function Settings() {
                               <select className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={user.role} onChange={(event) => { void changeUserRole(user.id, event.target.value); }}>
                                 <option value="Viewer">Viewer</option>
                                 <option value="Editor">Editor</option>
-                                <option value="Owner">Owner</option>
+                                <option value="Author">Author</option>
                               </select>
                             ) : null}
 
