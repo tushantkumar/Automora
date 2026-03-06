@@ -71,7 +71,7 @@ export function Sidebar() {
         <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold font-heading text-lg shadow-lg shadow-primary/20">
           A
         </div>
-        <span className="font-heading font-bold text-xl tracking-tight text-sidebar-foreground">Autoflow</span>
+        <span className="font-heading font-bold text-xl tracking-tight text-sidebar-foreground">Automora</span>
       </div>
 
       <nav className="flex-1 px-4 py-4 space-y-1">
