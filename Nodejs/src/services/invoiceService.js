@@ -164,7 +164,7 @@ const drawRow = ({ doc, y, label, value }) => {
   doc.fillColor("#0f172a").font("Helvetica").fontSize(10).text(value, 220, y + 8, { width: 315, align: "right" });
 };
 
-const generateInvoicePdfBuffer = async ({ invoice }) => {
+const generateInvoicePdfBuffer = async ({ invoice, companyName = "Automora" }) => {
   const doc = new PDFDocument({ size: "A4", margin: 50 });
   const bufferPromise = collectPdfBuffer(doc);
 
@@ -180,6 +180,7 @@ const generateInvoicePdfBuffer = async ({ invoice }) => {
 
   let y = 165;
   drawRow({ doc, y, label: "Invoice Number", value: safeInvoiceNumber }); y += 34;
+  drawRow({ doc, y, label: "Organization", value: String(companyName || "Automora") }); y += 34;
   drawRow({ doc, y, label: "Issue Date", value: toFriendlyDate(invoice?.issue_date) }); y += 34;
   drawRow({ doc, y, label: "Due Date", value: toFriendlyDate(invoice?.due_date) }); y += 34;
   drawRow({ doc, y, label: "Status", value: String(invoice?.status || "-") }); y += 34;
@@ -398,7 +399,10 @@ export const getInvoicePdfForUser = async (authHeader, invoiceId) => {
   if (!invoice) return { status: 404, body: { message: "invoice not found" } };
 
   try {
-    const buffer = await generateInvoicePdfBuffer({ invoice });
+    const buffer = await generateInvoicePdfBuffer({
+      invoice,
+      companyName: String(user?.organization_name || user?.name || "Automora"),
+    });
     const invoiceNumber = String(invoice?.invoice_number || invoice?.id || "invoice").replace(/[^a-zA-Z0-9-_]/g, "_");
 
     return {
@@ -607,7 +611,10 @@ export const sendInvoiceEmailForUser = async (authHeader, invoiceId) => {
 
   let buffer;
   try {
-    buffer = await generateInvoicePdfBuffer({ invoice });
+    buffer = await generateInvoicePdfBuffer({
+      invoice,
+      companyName: String(user?.organization_name || user?.name || "Automora"),
+    });
   } catch {
     return { status: 502, body: { message: "Unable to generate invoice PDF" } };
   }

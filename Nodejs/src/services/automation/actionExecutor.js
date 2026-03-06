@@ -62,7 +62,7 @@ const parseInvoiceLineItems = (lineItems) => {
   }
 };
 
-const buildAutomationInvoicePdfBuffer = async (invoice) => {
+const buildAutomationInvoicePdfBuffer = async (invoice, companyName = "Automora") => {
   const doc = new PDFDocument({ size: "A4", margin: 40 });
   const chunks = [];
   const done = new Promise((resolve, reject) => {
@@ -84,6 +84,7 @@ const buildAutomationInvoicePdfBuffer = async (invoice) => {
   doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#f5f3ff", "#ddd6fe");
   doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(24).text("INVOICE", 56, y + 18);
   doc.fillColor("#6d28d9").font("Helvetica").fontSize(11).text(`Invoice #${invoiceNumber}`, 56, y + 50);
+  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(`Organization: ${String(companyName || "Automora")}`, 210, y + 52, { width: 200 });
   doc.fillColor("#1f2937").font("Helvetica").fontSize(11).text(`Generated: ${new Date().toLocaleDateString()}`, 420, y + 24, { align: "right", width: 120 });
 
   y += 96;
@@ -416,7 +417,10 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
   const attachments = [];
 
   if (hasInvoice) {
-    const pdfBuffer = await buildAutomationInvoicePdfBuffer(rendered.invoice);
+    const pdfBuffer = await buildAutomationInvoicePdfBuffer(
+      rendered.invoice,
+      String(rendered?.user?.organization_name || rendered?.user?.name || "Automora"),
+    );
     const invoiceNumber = String(rendered.invoice?.invoice_number || rendered.invoice?.id || "invoice").replace(/[^a-zA-Z0-9-_]/g, "_");
     attachments.push({
       filename: `invoice-${invoiceNumber}.pdf`,
