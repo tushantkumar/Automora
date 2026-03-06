@@ -231,13 +231,10 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
   const recipient = resolveRecipient(renderContext);
   if (!recipient) throw new Error("No recipient email could be resolved for automation");
 
-  const systemSettings = await getEffectiveSystemSettingsByUserId(userId);
-
   const html = buildAutomationEmailLayout({
     companyName: renderContext?.user?.organization_name || renderContext?.user?.name || "Automora",
     bodyHtml: toParagraphHtml(finalBodyText),
     invoice,
-    supportHighlightText: systemSettings.supportHighlightText,
   });
 
   const organization_name = renderContext?.user?.organization_name;

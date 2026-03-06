@@ -51,12 +51,10 @@ type IntegrationState = {
 };
 
 type SystemSettingsState = {
-  supportHighlightText: string;
   companyName: string;
 };
 
 const initialSystemSettings: SystemSettingsState = {
-  supportHighlightText: "",
   companyName: "",
 };
 
@@ -130,7 +128,6 @@ export default function Settings() {
       if (!response.ok) return;
 
       setSystemSettings({
-        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
         companyName: String(data?.settings?.companyName || ""),
       });
     } catch {
@@ -162,7 +159,6 @@ export default function Settings() {
       }
 
       setSystemSettings({
-        supportHighlightText: String(data?.settings?.supportHighlightText || ""),
         companyName: String(data?.settings?.companyName || ""),
       });
       toast({ title: "⚙️ Settings", description: "System settings saved successfully." });
@@ -183,17 +179,11 @@ export default function Settings() {
       }
 
       try {
-        const [meResponse, onboardingResponse] = await Promise.all([
-          fetch(`${AUTH_API_URL}/me`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch(`${AUTH_API_URL}/onboarding`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
+        const meResponse = await fetch(`${AUTH_API_URL}/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
         const meData = await meResponse.json();
-        const onboardingData = onboardingResponse.ok ? await onboardingResponse.json() : null;
 
         if (!meResponse.ok) {
           toast({ title: "Unable to load profile details.", description: meData?.message || "Please try again." });
@@ -391,10 +381,22 @@ export default function Settings() {
                 </div>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="company-name">Company Name</Label>
+                <Input
+                  id="company-name"
+                  value={systemSettings.companyName}
+                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, companyName: event.target.value }))}
+                  placeholder="Automora"
+                  disabled={loadingSystemSettings || savingSystemSettings}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="status">Status</Label>
                 <Input id="status" value={profile.status} readOnly disabled={loadingProfile} />
               </div>
-              <Button disabled>Save Changes</Button>
+              <Button onClick={() => setConfirmSystemUpdateOpen(true)} disabled={loadingSystemSettings || savingSystemSettings}>
+                {savingSystemSettings ? "Saving..." : "Save Changes"}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -405,35 +407,10 @@ export default function Settings() {
               <CardTitle>System Preferences</CardTitle>
               <CardDescription>Configure system preferences for automation emails.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="company-name">Company Name</Label>
-                <Input
-                  id="company-name"
-                  value={systemSettings.companyName}
-                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, companyName: event.target.value }))}
-                  placeholder="Automora"
-                  disabled={loadingSystemSettings || savingSystemSettings}
-                />
-                <p className="text-xs text-muted-foreground">Displayed as company name in automation emails.</p>
-              </div>
-
-
-              <div className="space-y-2">
-                <Label htmlFor="support-highlight-text">Mail Address</Label>
-                <Input
-                  id="support-highlight-text"
-                  value={systemSettings.supportHighlightText}
-                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, supportHighlightText: event.target.value }))}
-                  placeholder="support@automora.local"
-                  disabled={loadingSystemSettings || savingSystemSettings}
-                />
-                <p className="text-xs text-muted-foreground">Shown mail address in automation emails. If left blank, default text is used.</p>
-              </div>
-
-              <Button onClick={() => setConfirmSystemUpdateOpen(true)} disabled={loadingSystemSettings || savingSystemSettings}>
-                {savingSystemSettings ? "Saving..." : "Save System Settings"}
-              </Button>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                System email fields were deprecated. Company details are now managed under the Profile tab.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>

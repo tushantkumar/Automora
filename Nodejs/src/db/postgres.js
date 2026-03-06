@@ -247,10 +247,11 @@ export const initDatabase = async () => {
     CREATE TABLE IF NOT EXISTS auth_system_settings (
       user_id TEXT PRIMARY KEY REFERENCES auth_users(id) ON DELETE CASCADE,
       smtp_from TEXT,
-      support_highlight_text TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+
+  await pool.query(`ALTER TABLE auth_system_settings DROP COLUMN IF EXISTS support_highlight_text;`);
 
   await pool.query(`
     INSERT INTO auth_mail_templates (id, user_id, name, subject, body)
