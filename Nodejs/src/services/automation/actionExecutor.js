@@ -401,7 +401,7 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
     from: systemSettings.smtpFrom,
     subject: rendered.subject,
     bodyText: rendered.body,
-    htmlBody: hasInvoice ? "" : rendered.html,
+    htmlBody: rendered.html,
     replyToExternalId,
     attachments,
   });
