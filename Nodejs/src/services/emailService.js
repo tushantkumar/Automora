@@ -104,3 +104,38 @@ export const sendAccountDeletionOtpEmail = async ({ userEmail, name, otp, expire
 
   logMail("account deletion otp", userEmail, info.messageId);
 };
+
+
+export const sendUserInvitationEmail = async ({ userEmail, inviterName, inviteeName, role, activationLink, expiresInHours }) => {
+  const safeInvitee = escapeHtml(inviteeName || "there");
+  const safeInviter = escapeHtml(inviterName || "Automora Admin");
+  const safeRole = escapeHtml(role || "Viewer");
+  const safeLink = escapeHtml(activationLink || "");
+  const hours = Number.isFinite(expiresInHours) ? expiresInHours : 24;
+
+  const info = await transporter.sendMail({
+    from: SMTP_FROM,
+    to: userEmail,
+    subject: "You're invited to Automora",
+    text: `Hi ${inviteeName || "there"},
+
+${inviterName || "An admin"} invited you to Automora as ${role}.
+Activate your account using this secure link: ${activationLink}
+This link expires in ${hours} hours.
+
+If you were not expecting this invitation, you can ignore this email.`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
+        <h2 style="margin:0 0 12px">You're invited to Automora</h2>
+        <p>Hi ${safeInvitee},</p>
+        <p>${safeInviter} invited you to Automora as <b>${safeRole}</b>.</p>
+        <p>Please activate your account using this secure link:</p>
+        <p><a href="${safeLink}">${safeLink}</a></p>
+        <p>This link expires in <b>${hours} hours</b>.</p>
+        <p>If you were not expecting this invitation, you can ignore this email.</p>
+      </div>
+    `,
+  });
+
+  logMail("user invitation", userEmail, info.messageId, activationLink);
+};

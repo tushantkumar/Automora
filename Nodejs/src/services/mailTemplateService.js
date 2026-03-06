@@ -6,6 +6,7 @@ import {
   updateMailTemplateById,
 } from "../db/mailTemplateRepository.js";
 import { createUserId } from "../utils/auth.js";
+import { canCreateResources, canDeleteResources, canUpdateResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -13,7 +14,9 @@ const readBearerToken = (authHeader) =>
 const getAuthorizedUser = async (authHeader) => {
   const token = readBearerToken(authHeader);
   if (!token) return null;
-  return getUserBySessionToken(token);
+  const user = await getUserBySessionToken(token);
+  if (!user) return null;
+  return { ...user, actor_user_id: user.id, id: user.workspace_id || user.id };
 };
 
 const normalizePayload = (payload) => ({
@@ -33,6 +36,8 @@ export const getMailTemplatesForUser = async (authHeader) => {
 export const createMailTemplateForUser = async (authHeader, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canCreateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
   if (!data.name || !data.subject || !data.body) {
@@ -51,6 +56,8 @@ export const createMailTemplateForUser = async (authHeader, payload) => {
 export const updateMailTemplateForUser = async (authHeader, templateId, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canUpdateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
   if (!data.name || !data.subject || !data.body) {
@@ -71,6 +78,7 @@ export const updateMailTemplateForUser = async (authHeader, templateId, payload)
 export const deleteMailTemplateForUser = async (authHeader, templateId) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canDeleteResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const deleted = await deleteMailTemplateById({ templateId, userId: user.id });
   if (!deleted) return { status: 404, body: { message: "mail template not found" } };

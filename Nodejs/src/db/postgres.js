@@ -59,9 +59,34 @@ export const initDatabase = async () => {
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Active';`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS platform_tier TEXT NOT NULL DEFAULT 'free';`);
   await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS subscription_plan TEXT NOT NULL DEFAULT 'Starter';`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'Admin';`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS invited_by TEXT REFERENCES auth_users(id) ON DELETE SET NULL;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS invited_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS invitation_accepted_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS workspace_id TEXT;`);
+  await pool.query(`UPDATE auth_users SET workspace_id = id WHERE workspace_id IS NULL;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS industry TEXT;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS business_bio TEXT;`);
   await pool.query(`ALTER TABLE auth_onboarding_details ADD COLUMN IF NOT EXISTS selected_automations JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_user_invites (
+      id TEXT PRIMARY KEY,
+      inviter_user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+      invited_name TEXT NOT NULL,
+      invited_email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      used_at TIMESTAMPTZ,
+      disabled_at TIMESTAMPTZ,
+      last_sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (inviter_user_id, invited_email)
+    );
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -247,10 +272,11 @@ export const initDatabase = async () => {
     CREATE TABLE IF NOT EXISTS auth_system_settings (
       user_id TEXT PRIMARY KEY REFERENCES auth_users(id) ON DELETE CASCADE,
       smtp_from TEXT,
-      support_highlight_text TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+
+  await pool.query(`ALTER TABLE auth_system_settings DROP COLUMN IF EXISTS support_highlight_text;`);
 
   await pool.query(`
     INSERT INTO auth_mail_templates (id, user_id, name, subject, body)
@@ -311,4 +337,9 @@ export const ensureDatabaseIndexes = async () => {
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_automations_trigger_type_idx ON auth_automations(trigger_type);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_draft_emails_user_id_idx ON auth_draft_emails(user_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS auth_system_settings_user_id_idx ON auth_system_settings(user_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_users_role_idx ON auth_users(role);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_users_invited_by_idx ON auth_users(invited_by);`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS auth_user_invites_token_hash_idx ON auth_user_invites(token_hash);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_user_invites_inviter_user_id_idx ON auth_user_invites(inviter_user_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS auth_user_invites_invited_email_idx ON auth_user_invites(invited_email);`);
 };

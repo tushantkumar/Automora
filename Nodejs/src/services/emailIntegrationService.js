@@ -21,6 +21,7 @@ import {
   OLLAMA_BASE_URL,
   OLLAMA_MODEL,
 } from "../config/constants.js";
+import { canCreateResources, canSendMail, canUploadResources } from "./rbacService.js";
 
 const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -35,7 +36,9 @@ const readBearerToken = (authHeader) =>
 const getAuthorizedUser = async (authHeader) => {
   const token = readBearerToken(authHeader);
   if (!token) return null;
-  return getUserBySessionToken(token);
+  const user = await getUserBySessionToken(token);
+  if (!user) return null;
+  return { ...user, actor_user_id: user.id, id: user.workspace_id || user.id };
 };
 
 const encodeState = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
@@ -136,10 +139,11 @@ const normalizeBase64Attachment = (value) => {
   return withoutPrefix.replace(/\s+/g, "");
 };
 
-const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachments = [] }) => {
+const buildRawEmail = ({ to, subject, bodyText, bodyHtml = "", inReplyTo, references, attachments = [] }) => {
   const safeTo = String(to || "").trim();
   const safeSubject = String(subject || "").trim() || "(no subject)";
   const safeBody = String(bodyText || "").trim();
+  const safeBodyHtml = String(bodyHtml || "").trim();
   const safeInReplyTo = String(inReplyTo || "").trim();
   const safeReferences = String(references || "").trim();
 
@@ -151,6 +155,7 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachmen
       }))
       .filter((item) => item.contentBase64)
     : [];
+
   const headers = [
     `To: ${safeTo}`,
     "MIME-Version: 1.0",
@@ -160,7 +165,7 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachmen
   if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
   if (safeReferences) headers.push(`References: ${safeReferences}`);
 
-  if (safeAttachments.length === 0) {
+  if (safeAttachments.length === 0 && !safeBodyHtml) {
     headers.push("Content-Type: text/plain; charset=\"UTF-8\"");
     return [...headers, "", safeBody].join("\r\n");
   }
@@ -168,13 +173,35 @@ const buildRawEmail = ({ to, subject, bodyText, inReplyTo, references, attachmen
   const boundary = `mixed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
 
-  const parts = [
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=\"UTF-8\"",
-    "Content-Transfer-Encoding: 7bit",
-    "",
-    safeBody,
-  ];
+  const parts = [];
+
+  if (safeBodyHtml) {
+    const alternativeBoundary = `alt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+      "",
+      `--${alternativeBoundary}`,
+      "Content-Type: text/plain; charset=\"UTF-8\"",
+      "Content-Transfer-Encoding: 7bit",
+      "",
+      safeBody,
+      `--${alternativeBoundary}`,
+      "Content-Type: text/html; charset=\"UTF-8\"",
+      "Content-Transfer-Encoding: 7bit",
+      "",
+      safeBodyHtml,
+      `--${alternativeBoundary}--`,
+    );
+  } else {
+    parts.push(
+      `--${boundary}`,
+      "Content-Type: text/plain; charset=\"UTF-8\"",
+      "Content-Transfer-Encoding: 7bit",
+      "",
+      safeBody,
+    );
+  }
 
   safeAttachments.forEach((attachment) => {
     const fileName = String(attachment?.filename || "attachment.bin").replace(/["\r\n]/g, "");
@@ -492,6 +519,7 @@ export const getEmailIntegrationStatus = async (authHeader) => {
 export const getGmailAuthorizationUrl = async (authHeader) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canCreateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
     return { status: 400, body: { message: "Gmail integration is not configured on server" } };
@@ -549,6 +577,7 @@ export const handleGmailCallback = async ({ code, state }) => {
 export const syncGmailEmails = async (authHeader) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canUploadResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const integration = await getEmailIntegrationByProvider({ userId: user.id, provider: "gmail" });
   if (!integration?.access_token) {
@@ -642,6 +671,8 @@ export const getInboxThread = async (authHeader, externalId = "") => {
 export const sendGmailEmail = async (authHeader, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canSendMail(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const integration = await getEmailIntegrationByProvider({ userId: user.id, provider: "gmail" });
   if (!integration?.access_token) {
@@ -651,6 +682,7 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
   const to = String(payload.to || "").trim();
   const subject = String(payload.subject || "").trim();
   const bodyText = String(payload.body || "").trim();
+  const bodyHtml = String(payload.bodyHtml || "").trim();
   const replyToExternalId = String(payload.replyToExternalId || "").trim();
   const attachments = Array.isArray(payload?.attachments)
     ? payload.attachments
@@ -692,7 +724,7 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
 
     const inReplyTo = replyContext?.messageIdHeader || "";
     const references = [replyContext?.referencesHeader, replyContext?.messageIdHeader].filter(Boolean).join(" ").trim();
-    const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, inReplyTo, references, attachments }));
+    const raw = encodeBase64Url(buildRawEmail({ to, subject, bodyText, bodyHtml, inReplyTo, references, attachments }));
 
     const response = await gmail.users.messages.send({
       userId: "me",
@@ -739,6 +771,8 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
 export const disconnectEmailIntegration = async (authHeader, provider = "") => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canCreateResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   if (!["gmail", "outlook"].includes(normalizedProvider)) {

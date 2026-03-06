@@ -89,11 +89,11 @@ export function Sidebar() {
               >
                 <link.icon className={cn("w-5 h-5", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
                 <span>{link.label}</span>
-                {link.badge && (
+                {/* {link.badge && (
                   <span className="ml-auto bg-primary text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                     {link.badge}
                   </span>
-                )}
+                )} */}
                 {isActive && <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-l-full" />}
               </a>
             </Link>
