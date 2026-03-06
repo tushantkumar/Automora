@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,6 +86,7 @@ export default function Settings() {
   const [loadingManagedUsers, setLoadingManagedUsers] = useState(false);
   const [invitingUser, setInvitingUser] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "Viewer" });
+  const [userFilter, setUserFilter] = useState({ name: "", email: "", role: "all" });
   const { toast } = useToast();
 
   const loadIntegrations = async () => {
@@ -406,6 +408,15 @@ export default function Settings() {
     }
   };
 
+
+
+
+  const filteredManagedUsers = useMemo(() => managedUsers.filter((user) => {
+    const nameOk = userFilter.name.trim() ? user.name.toLowerCase().includes(userFilter.name.trim().toLowerCase()) : true;
+    const emailOk = userFilter.email.trim() ? user.email.toLowerCase().includes(userFilter.email.trim().toLowerCase()) : true;
+    const roleOk = userFilter.role === "all" ? true : user.role === userFilter.role;
+    return nameOk && emailOk && roleOk;
+  }), [managedUsers, userFilter]);
   return (
     <AppLayout>
       <div className="mb-8">
@@ -547,41 +558,63 @@ export default function Settings() {
                   <CardTitle>Users</CardTitle>
                   <CardDescription>Name, email, role, status, invited date and actions.</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input placeholder="Filter by name" value={userFilter.name} onChange={(event) => setUserFilter((prev) => ({ ...prev, name: event.target.value }))} />
+                    <Input placeholder="Filter by email" value={userFilter.email} onChange={(event) => setUserFilter((prev) => ({ ...prev, email: event.target.value }))} />
+                    <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userFilter.role} onChange={(event) => setUserFilter((prev) => ({ ...prev, role: event.target.value }))}>
+                      <option value="all">All Roles</option>
+                      <option value="Viewer">Viewer</option>
+                      <option value="Editor">Editor</option>
+                      <option value="Author">Author</option>
+                    </select>
+                  </div>
+
                   {loadingManagedUsers ? (
                     <p className="text-sm text-muted-foreground">Loading users...</p>
-                  ) : managedUsers.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No invited users yet.</p>
+                  ) : filteredManagedUsers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No users found for selected filters.</p>
                   ) : (
-                    <div className="space-y-3">
-                      {managedUsers.map((user) => (
-                        <div key={`${user.id}-${user.email}`} className="rounded-md border p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                          <div>
-                            <p className="font-medium text-sm">{user.name}</p>
-                            <p className="text-xs text-muted-foreground">{user.email}</p>
-                            <p className="text-xs text-muted-foreground">Role: {user.role} • Status: {user.status}</p>
-                            <p className="text-xs text-muted-foreground">Invited: {new Date(user.invitedDate).toLocaleString()}</p>
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {user.status !== "Pending" && user.status !== "Expired" ? (
-                              <select className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={user.role} onChange={(event) => { void changeUserRole(user.id, event.target.value); }}>
-                                <option value="Viewer">Viewer</option>
-                                <option value="Editor">Editor</option>
-                                <option value="Author">Author</option>
-                              </select>
-                            ) : null}
-
-                            {user.status === "Pending" || user.status === "Expired" ? (
-                              <Button variant="outline" size="sm" onClick={() => { void resendInvite(user.email); }}>Resend Invite</Button>
-                            ) : (
-                              <Button variant={user.isDisabled ? "default" : "destructive"} size="sm" onClick={() => { void disableUser(user.id, !user.isDisabled); }}>
-                                {user.isDisabled ? "Enable User" : "Disable User"}
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Invited Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredManagedUsers.map((user) => (
+                          <TableRow key={`${user.id}-${user.email}`}>
+                            <TableCell>{user.name}</TableCell>
+                            <TableCell>{user.email}</TableCell>
+                            <TableCell>
+                              {user.status !== "Pending" && user.status !== "Expired" ? (
+                                <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={user.role} onChange={(event) => { void changeUserRole(user.id, event.target.value); }}>
+                                  <option value="Viewer">Viewer</option>
+                                  <option value="Editor">Editor</option>
+                                  <option value="Author">Author</option>
+                                </select>
+                              ) : user.role}
+                            </TableCell>
+                            <TableCell>{user.status}</TableCell>
+                            <TableCell>{new Date(user.invitedDate).toLocaleString()}</TableCell>
+                            <TableCell className="text-right">
+                              {user.status === "Pending" || user.status === "Expired" ? (
+                                <Button variant="outline" size="sm" onClick={() => { void resendInvite(user.email); }}>Resend Invite</Button>
+                              ) : (
+                                <Button variant={user.isDisabled ? "default" : "destructive"} size="sm" onClick={() => { void disableUser(user.id, !user.isDisabled); }}>
+                                  {user.isDisabled ? "Enable User" : "Disable User"}
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   )}
                 </CardContent>
               </Card>
@@ -673,6 +706,7 @@ function IntegrationCard({
   onSecondaryAction?: () => void;
 }) {
   const isConnected = status.startsWith("Connected");
+
 
   return (
     <Card>

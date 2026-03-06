@@ -8,6 +8,7 @@ import {
   getUserByEmail,
   getUserById,
   getUserBySessionToken,
+  upsertOrganizationNameByUserId,
   listManagedUsers,
   listPendingInvites,
   markInviteUsed,
@@ -305,6 +306,7 @@ export const activateInvitedUser = async ({ token, password, confirmPassword }) 
   if (existing) return { status: 409, body: { message: "account already activated" } };
 
   const now = new Date();
+  const inviter = await getUserById(invite.inviter_user_id);
   const created = await createInvitedUser({
     id: createUserId(),
     name: invite.invited_name,
@@ -315,6 +317,11 @@ export const activateInvitedUser = async ({ token, password, confirmPassword }) 
     invitedAt: invite.created_at || now,
     invitationAcceptedAt: now,
   });
+
+  const inviterCompanyName = String(inviter?.organization_name || "").trim();
+  if (inviterCompanyName) {
+    await upsertOrganizationNameByUserId({ userId: created.id, organizationName: inviterCompanyName });
+  }
 
   await markInviteUsed(invite.id);
 
