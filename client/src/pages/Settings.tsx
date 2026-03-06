@@ -83,6 +83,9 @@ export default function Settings() {
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteOtp, setDeleteOtp] = useState("");
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
+  const [deleteTargetUser, setDeleteTargetUser] = useState<ManagedUser | null>(null);
+  const [deletingManagedUser, setDeletingManagedUser] = useState(false);
   const [loadingManagedUsers, setLoadingManagedUsers] = useState(false);
   const [invitingUser, setInvitingUser] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "Viewer" });
@@ -412,10 +415,17 @@ export default function Settings() {
 
 
 
-  const deleteUser = async (userId: string) => {
-    if (!token) return;
+  const requestDeleteUser = (user: ManagedUser) => {
+    setDeleteTargetUser(user);
+    setDeleteUserDialogOpen(true);
+  };
+
+  const deleteUser = async () => {
+    if (!token || !deleteTargetUser) return;
+
+    setDeletingManagedUser(true);
     try {
-      const response = await fetch(`${AUTH_API_URL}/admin/users/${userId}`, {
+      const response = await fetch(`${AUTH_API_URL}/admin/users/${deleteTargetUser.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -425,11 +435,16 @@ export default function Settings() {
         return;
       }
       toast({ title: "User deleted." });
+      setDeleteUserDialogOpen(false);
+      setDeleteTargetUser(null);
       void loadManagedUsers();
     } catch {
       toast({ title: "Unable to delete user", description: "Please try again." });
+    } finally {
+      setDeletingManagedUser(false);
     }
   };
+
 
   const filteredManagedUsers = useMemo(() => managedUsers.filter((user) => {
     const nameOk = userFilter.name.trim() ? user.name.toLowerCase().includes(userFilter.name.trim().toLowerCase()) : true;
@@ -641,7 +656,7 @@ export default function Settings() {
                                   <Button variant={user.isDisabled ? "default" : "destructive"} size="sm" onClick={() => { void disableUser(user.id, !user.isDisabled); }}>
                                     {user.isDisabled ? "Enable User" : "Deactivate"}
                                   </Button>
-                                  <Button variant="destructive" size="sm" onClick={() => { void deleteUser(user.id); }}>Delete</Button>
+                                  <Button variant="destructive" size="sm" onClick={() => requestDeleteUser(user)}>Delete</Button>
                                 </div>
                               )}
                             </TableCell>
@@ -656,6 +671,36 @@ export default function Settings() {
           )}
         </TabsContent>
       </Tabs>
+
+      <AlertDialog
+        open={deleteUserDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteUserDialogOpen(open);
+          if (!open && !deletingManagedUser) setDeleteTargetUser(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`This will permanently delete ${deleteTargetUser?.name || "this user"} (${deleteTargetUser?.email || ""}). This action cannot be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingManagedUser}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deletingManagedUser}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(event) => {
+                event.preventDefault();
+                void deleteUser();
+              }}
+            >
+              {deletingManagedUser ? "Deleting..." : "Delete User"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>

@@ -41,21 +41,57 @@ const getAuthorizedUser = async (authHeader) => {
 const tokenHash = (value) => crypto.createHash("sha256").update(String(value || "")).digest("hex");
 
 const sendInviteMessage = async ({ authHeader, inviteeEmail, inviterName, inviteeName, role, activationLink }) => {
-  const subject = "You're invited to Automora";
+  const inviterDisplayName = String(inviterName || "Admin").trim() || "Admin";
+  const inviteeDisplayName = String(inviteeName || "there").trim() || "there";
+  const subject = `You're invited to join ${inviterDisplayName}'s Automora workspace`;
   const text = [
-    `Hi ${inviteeName || "there"},`,
+    `Hi ${inviteeDisplayName},`,
     "",
-    `${inviterName || "An admin"} invited you to Automora as ${role}.`,
+    `${inviterDisplayName} invited you to join their Automora workspace as ${role}.`,
     `Activate your account using this secure link: ${activationLink}`,
     `This link expires in ${INVITE_EXPIRY_HOURS} hours.`,
     "",
     "If you were not expecting this invitation, you can ignore this email.",
   ].join("\n");
 
+  const html = `
+  <div style="background:#f5f7fb;padding:24px 0;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 28px;background:linear-gradient(135deg,#0ea5e9,#2563eb);color:#ffffff;">
+                <h1 style="margin:0;font-size:22px;line-height:1.3;">You're invited to Automora</h1>
+                <p style="margin:8px 0 0 0;font-size:14px;opacity:0.95;">Join ${inviterDisplayName}'s workspace as <strong>${role}</strong></p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px;">
+                <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;">Hi ${inviteeDisplayName},</p>
+                <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;">${inviterDisplayName} has invited you to collaborate in Automora. Click the button below to activate your account securely.</p>
+                <p style="margin:0 0 24px 0;text-align:center;">
+                  <a href="${activationLink}" style="display:inline-block;padding:12px 20px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;">Activate account</a>
+                </p>
+                <div style="padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;background:#f8fafc;margin-bottom:18px;">
+                  <p style="margin:0 0 6px 0;font-size:13px;color:#334155;"><strong>Activation link:</strong></p>
+                  <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="${activationLink}" style="color:#2563eb;">${activationLink}</a></p>
+                </div>
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#475569;">This secure invite link expires in <strong>${INVITE_EXPIRY_HOURS} hours</strong> and can only be used once.</p>
+                <p style="margin:14px 0 0 0;font-size:12px;line-height:1.6;color:#64748b;">If you did not expect this invitation, you can safely ignore this email.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </div>`;
+
   const gmailResult = await sendGmailEmail(authHeader, {
     to: inviteeEmail,
     subject,
     body: text,
+    bodyHtml: html,
   });
 
   if (gmailResult.status !== 200) {
