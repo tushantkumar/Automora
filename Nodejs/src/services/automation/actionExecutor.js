@@ -240,7 +240,8 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
     supportHighlightText: systemSettings.supportHighlightText,
   });
 
-  return { to: recipient, subject, body: finalBodyText, html, invoice };
+  const organization_name = renderContext?.user?.organization_name;
+  return { to: recipient, subject, body: finalBodyText, html, invoice, organization_name};
 };
 
 
@@ -428,7 +429,7 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
   if (hasInvoice) {
     const pdfBuffer = await buildAutomationInvoicePdfBuffer(
       rendered.invoice,
-      String(rendered?.user?.organization_name || rendered?.user?.name || "Automora"),
+      String(rendered?.organization_name || rendered?.user?.name || "Automora"),
     );
     const invoiceNumber = String(rendered.invoice?.invoice_number || rendered.invoice?.id || "invoice").replace(/[^a-zA-Z0-9-_]/g, "_");
     attachments.push({
