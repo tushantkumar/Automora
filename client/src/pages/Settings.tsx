@@ -403,7 +403,7 @@ export default function Settings() {
           <Card>
             <CardHeader>
               <CardTitle>System Preferences</CardTitle>
-              <CardDescription>Configure company name and highlighted support text for automation emails.</CardDescription>
+              <CardDescription>Configure system preferences for automation emails.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -420,7 +420,7 @@ export default function Settings() {
 
 
               <div className="space-y-2">
-                <Label htmlFor="support-highlight-text">Highlighted Support Text</Label>
+                <Label htmlFor="support-highlight-text">Mail Address</Label>
                 <Input
                   id="support-highlight-text"
                   value={systemSettings.supportHighlightText}
@@ -428,7 +428,7 @@ export default function Settings() {
                   placeholder="support@automora.local"
                   disabled={loadingSystemSettings || savingSystemSettings}
                 />
-                <p className="text-xs text-muted-foreground">Shown in the highlighted support area in automation emails. If left blank, default text is used.</p>
+                <p className="text-xs text-muted-foreground">Shown mail address in automation emails. If left blank, default text is used.</p>
               </div>
 
               <Button onClick={() => setConfirmSystemUpdateOpen(true)} disabled={loadingSystemSettings || savingSystemSettings}>
