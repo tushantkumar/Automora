@@ -78,7 +78,13 @@ const buildAutomationInvoicePdfBuffer = async (invoice, companyName = "Automora"
   const dueDate = String(invoice?.due_date || "").slice(0, 10) || "-";
   const status = String(invoice?.status || "-");
   const amount = toCurrency(invoice?.amount);
+  const lineItems = parseInvoiceLineItems(invoice?.line_items);
   const taxRate = `${Number(invoice?.tax_rate || 0).toFixed(2)}%`;
+  const notes = String(invoice?.notes || "-");
+  const subtotalValue = (lineItems.length > 0
+    ? lineItems.reduce((sum, item) => sum + (Number(item?.quantity || 0) * Number(item?.rate || 0)), 0)
+    : Number(invoice?.amount || 0));
+  const subtotal = toCurrency(subtotalValue);
 
   let y = 40;
   doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#4f46e5", "#4338ca");
@@ -100,9 +106,14 @@ const buildAutomationInvoicePdfBuffer = async (invoice, companyName = "Automora"
   doc.text(`Due Date: ${dueDate}`, 319, y + 50);
   doc.text(`Status: ${status}`, 319, y + 66);
   doc.text(`Tax: ${taxRate}`, 319, y + 82);
-  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Total: ${amount}`, 319, y + 100);
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Subtotal: ${subtotal}`, 319, y + 100);
 
-  y += 142;
+  y += 132;
+  doc.roundedRect(40, y, 515, 42, 8).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("NOTES", 52, y + 10);
+  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(notes, 110, y + 10, { width: 430 });
+
+  y += 58;
   doc.fillColor("#111827").font("Helvetica-Bold").fontSize(12).text("Line Items", 40, y);
   y += 20;
 
@@ -114,7 +125,6 @@ const buildAutomationInvoicePdfBuffer = async (invoice, companyName = "Automora"
   doc.text("Total", 470, y + 8, { width: 70, align: "right" });
   y += 30;
 
-  const lineItems = parseInvoiceLineItems(invoice?.line_items);
   const rows = lineItems.length > 0 ? lineItems : [{ description: "Invoice Amount", quantity: 1, rate: Number(invoice?.amount || 0) }];
 
   rows.forEach((item) => {
@@ -138,7 +148,7 @@ const buildAutomationInvoicePdfBuffer = async (invoice, companyName = "Automora"
 
   y += 10;
   doc.roundedRect(340, y, 215, 34, 8).fillAndStroke("#f5f3ff", "#ddd6fe");
-  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Grand Total: ${amount}`, 355, y + 11);
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Subtotal: ${subtotal}`, 355, y + 11);
 
   doc.end();
   return done;
