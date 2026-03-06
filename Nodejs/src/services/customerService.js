@@ -11,7 +11,7 @@ import {
 import { createUserId, normalizeEmail } from "../utils/auth.js";
 import { countInvoicesByCustomerId, listInvoicesByCustomerId } from "../db/invoiceRepository.js";
 import { runAutomations } from "./automation/executionEngine.js";
-import { canDeleteResources } from "./rbacService.js";
+import { canDeleteResources, canModifyResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -327,6 +327,8 @@ export const getCustomersForUser = async (authHeader) => {
 export const createCustomerForUser = async (authHeader, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
   if (!data.name || !data.client || !data.contact || !data.email) {
@@ -357,6 +359,8 @@ export const createCustomerForUser = async (authHeader, payload) => {
 export const updateCustomerForUser = async (authHeader, customerId, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const data = normalizePayload(payload);
   if (!data.name || !data.client || !data.contact || !data.email) {
@@ -479,6 +483,7 @@ export const getCustomerInvoicePdfForUser = async (authHeader, customerId) => {
 export const importCustomersExcelForUser = async (authHeader, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const fileData = String(payload?.fileData || "").trim();
   if (!fileData) return { status: 400, body: { message: "fileData is required" } };

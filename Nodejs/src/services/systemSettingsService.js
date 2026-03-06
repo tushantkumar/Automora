@@ -1,6 +1,7 @@
 import { SMTP_FROM } from "../config/constants.js";
 import { getUserBySessionToken, upsertOrganizationNameByUserId } from "../db/authRepository.js";
 import { getSystemSettingsByUserId, upsertSystemSettingsByUserId } from "../db/systemSettingsRepository.js";
+import { canModifyResources } from "./rbacService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -29,6 +30,7 @@ export const getSystemSettingsForUser = async (authHeader) => {
 export const updateSystemSettingsForUser = async (authHeader, payload) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const companyName = String(payload?.companyName || "").trim();
 

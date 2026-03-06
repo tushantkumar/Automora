@@ -21,6 +21,7 @@ import {
   OLLAMA_BASE_URL,
   OLLAMA_MODEL,
 } from "../config/constants.js";
+import { canModifyResources } from "./rbacService.js";
 
 const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -494,6 +495,7 @@ export const getEmailIntegrationStatus = async (authHeader) => {
 export const getGmailAuthorizationUrl = async (authHeader) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
     return { status: 400, body: { message: "Gmail integration is not configured on server" } };
@@ -551,6 +553,7 @@ export const handleGmailCallback = async ({ code, state }) => {
 export const syncGmailEmails = async (authHeader) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
 
   const integration = await getEmailIntegrationByProvider({ userId: user.id, provider: "gmail" });
   if (!integration?.access_token) {
@@ -644,6 +647,8 @@ export const getInboxThread = async (authHeader, externalId = "") => {
 export const sendGmailEmail = async (authHeader, payload = {}) => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const integration = await getEmailIntegrationByProvider({ userId: user.id, provider: "gmail" });
   if (!integration?.access_token) {
@@ -741,6 +746,8 @@ export const sendGmailEmail = async (authHeader, payload = {}) => {
 export const disconnectEmailIntegration = async (authHeader, provider = "") => {
   const user = await getAuthorizedUser(authHeader);
   if (!user) return { status: 401, body: { message: "unauthorized" } };
+  if (!canModifyResources(user.role)) return { status: 403, body: { message: "forbidden" } };
+
 
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   if (!["gmail", "outlook"].includes(normalizedProvider)) {
