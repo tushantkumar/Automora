@@ -15,6 +15,7 @@ import {
 import { createUserId } from "../utils/auth.js";
 import { getCustomerByEmail, getCustomerById, setCustomerRevenueById } from "../db/customerRepository.js";
 import { processInvoiceStatusChangeAutomations } from "./invoiceWorkflowAutomationService.js";
+import { sendGmailEmail } from "./emailIntegrationService.js";
 
 const readBearerToken = (authHeader) =>
   String(authHeader || "").startsWith("Bearer ") ? String(authHeader).slice(7) : "";
@@ -163,63 +164,87 @@ const drawRow = ({ doc, y, label, value }) => {
   doc.fillColor("#0f172a").font("Helvetica").fontSize(10).text(value, 220, y + 8, { width: 315, align: "right" });
 };
 
-const generateInvoicePdfBuffer = async ({ invoice }) => {
-  const doc = new PDFDocument({ size: "A4", margin: 50 });
+const generateInvoicePdfBuffer = async ({ invoice, companyName = "Automora" }) => {
+  const doc = new PDFDocument({ size: "A4", margin: 40 });
   const bufferPromise = collectPdfBuffer(doc);
 
   const lineItems = parseLineItems(invoice?.line_items);
-  const safeInvoiceNumber = String(invoice?.invoice_number || invoice?.id || "-");
+  const invoiceNumber = String(invoice?.invoice_number || invoice?.id || "-");
+  const customerName = String(invoice?.customer_name || invoice?.client_name || "-");
+  const customerEmail = String(invoice?.customer_email || "-");
+  const issueDate = String(invoice?.issue_date || "").slice(0, 10) || "-";
+  const dueDate = String(invoice?.due_date || "").slice(0, 10) || "-";
+  const status = String(invoice?.status || "-");
+  const amount = toCurrency(invoice?.amount);
+  const taxRate = `${Number(invoice?.tax_rate || 0).toFixed(2)}%`;
+  const notes = String(invoice?.notes || "-");
+  const subtotalValue = (lineItems.length > 0
+    ? lineItems.reduce((sum, item) => sum + (Number(item?.quantity || 0) * Number(item?.rate || 0)), 0)
+    : Number(invoice?.amount || 0));
+  const subtotal = toCurrency(subtotalValue);
 
-  doc.rect(0, 0, doc.page.width, 120).fill("#f1f5f9");
-  doc.rect(0, 0, doc.page.width, 80).fill("#4f46e5");
-  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text("Automora Invoice", 50, 28);
-  doc.fontSize(11).font("Helvetica").text(`Invoice #${safeInvoiceNumber}`, 50, 56);
+  let y = 40;
+  doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#4f46e5", "#4338ca");
+  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text(`${String(companyName || "Automora")} Invoice`, 56, y + 18);
+  doc.fillColor("#e0e7ff").font("Helvetica").fontSize(11).text(`Invoice ${invoiceNumber}`, 56, y + 50);
+  doc.fillColor("#f3f4f6").font("Helvetica").fontSize(11).text(`Generated: ${new Date().toLocaleDateString()}`, 420, y + 24, { align: "right", width: 120 });
 
-  doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(14).text("Invoice Details", 50, 140);
+  y += 96;
+  doc.roundedRect(40, y, 250, 122, 10).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("BILLED TO", 54, y + 14);
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(12).text(customerName, 54, y + 34, { width: 220 });
+  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(customerEmail, 54, y + 56, { width: 220 });
 
-  let y = 165;
-  drawRow({ doc, y, label: "Invoice Number", value: safeInvoiceNumber }); y += 34;
-  drawRow({ doc, y, label: "Issue Date", value: toFriendlyDate(invoice?.issue_date) }); y += 34;
-  drawRow({ doc, y, label: "Due Date", value: toFriendlyDate(invoice?.due_date) }); y += 34;
-  drawRow({ doc, y, label: "Status", value: String(invoice?.status || "-") }); y += 34;
-  drawRow({ doc, y, label: "Amount", value: toCurrency(invoice?.amount) }); y += 34;
-  drawRow({ doc, y, label: "Tax", value: `${Number(invoice?.tax_rate || 0).toFixed(2)}%` }); y += 34;
-  drawRow({ doc, y, label: "Customer", value: String(invoice?.customer_name || invoice?.client_name || "-") }); y += 34;
-  drawRow({ doc, y, label: "Customer Email", value: String(invoice?.customer_email || "-") }); y += 34;
-  drawRow({ doc, y, label: "Notes", value: String(invoice?.notes || "-") }); y += 44;
+  doc.roundedRect(305, y, 250, 122, 10).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("INVOICE DETAILS", 319, y + 14);
+  doc.fillColor("#111827").font("Helvetica").fontSize(10);
+  doc.text(`Issue Date: ${issueDate}`, 319, y + 34);
+  doc.text(`Due Date: ${dueDate}`, 319, y + 50);
+  doc.text(`Status: ${status}`, 319, y + 66);
+  doc.text(`Tax: ${taxRate}`, 319, y + 82);
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Grand Total: ${amount}`, 319, y + 100);
 
-  doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(14).text("Line Items", 50, y);
-  y += 24;
+  y += 132;
+  doc.roundedRect(40, y, 515, 42, 8).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("NOTES", 52, y + 10);
+  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(notes, 110, y + 10, { width: 430 });
 
-  doc.roundedRect(50, y, 495, 28, 6).fillAndStroke("#eef2ff", "#c7d2fe");
-  doc.fillColor("#3730a3").font("Helvetica-Bold").fontSize(10);
-  doc.text("Description", 62, y + 9, { width: 250 });
-  doc.text("Qty", 330, y + 9, { width: 60, align: "right" });
-  doc.text("Rate", 395, y + 9, { width: 65, align: "right" });
-  doc.text("Total", 470, y + 9, { width: 65, align: "right" });
-  y += 32;
+  y += 58;
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(12).text("Line Items", 40, y);
+  y += 20;
 
-  for (const item of lineItems) {
+  doc.roundedRect(40, y, 515, 26, 6).fillAndStroke("#ede9fe", "#ddd6fe");
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(9);
+  doc.text("Description", 52, y + 8, { width: 260 });
+  doc.text("Qty", 330, y + 8, { width: 60, align: "right" });
+  doc.text("Rate", 395, y + 8, { width: 70, align: "right" });
+  doc.text("Total", 470, y + 8, { width: 70, align: "right" });
+  y += 30;
+
+  const rows = lineItems.length > 0 ? lineItems : [{ description: "Invoice Amount", quantity: 1, rate: Number(invoice?.amount || 0) }];
+
+  rows.forEach((item) => {
     if (y > 760) {
       doc.addPage();
-      y = 50;
+      y = 48;
     }
 
-    const quantity = Number(item?.quantity || 0);
+    const qty = Number(item?.quantity || 0);
     const rate = Number(item?.rate || 0);
-    const total = quantity * rate;
+    const total = qty * rate;
 
-    doc.roundedRect(50, y, 495, 24, 5).fillAndStroke("#ffffff", "#e2e8f0");
-    doc.fillColor("#0f172a").font("Helvetica").fontSize(10);
-    doc.text(String(item?.description || "-"), 62, y + 7, { width: 250 });
-    doc.text(String(quantity), 330, y + 7, { width: 60, align: "right" });
-    doc.text(toCurrency(rate), 395, y + 7, { width: 65, align: "right" });
-    doc.text(toCurrency(total), 470, y + 7, { width: 65, align: "right" });
+    doc.roundedRect(40, y, 515, 24, 5).fillAndStroke("#ffffff", "#e5e7eb");
+    doc.fillColor("#111827").font("Helvetica").fontSize(9);
+    doc.text(String(item?.description || "-"), 52, y + 7, { width: 260 });
+    doc.text(String(qty), 330, y + 7, { width: 60, align: "right" });
+    doc.text(toCurrency(rate), 395, y + 7, { width: 70, align: "right" });
+    doc.text(toCurrency(total), 470, y + 7, { width: 70, align: "right" });
     y += 28;
-  }
+  });
 
   y += 10;
-  doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(12).text(`Grand Total: ${toCurrency(invoice?.amount)}`, 50, y, { align: "right" });
+  doc.roundedRect(340, y, 215, 34, 8).fillAndStroke("#f5f3ff", "#ddd6fe");
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Subtotal: ${subtotal}`, 355, y + 11);
 
   doc.end();
   return bufferPromise;
@@ -397,7 +422,10 @@ export const getInvoicePdfForUser = async (authHeader, invoiceId) => {
   if (!invoice) return { status: 404, body: { message: "invoice not found" } };
 
   try {
-    const buffer = await generateInvoicePdfBuffer({ invoice });
+    const buffer = await generateInvoicePdfBuffer({
+      invoice,
+      companyName: String(user?.organization_name || user?.name || "Automora"),
+    });
     const invoiceNumber = String(invoice?.invoice_number || invoice?.id || "invoice").replace(/[^a-zA-Z0-9-_]/g, "_");
 
     return {
@@ -586,6 +614,59 @@ export const getInvoiceImportTemplateForUser = async (authHeader) => {
     body: {
       buffer: Buffer.from(buffer),
       fileName: "invoice-upload-template.xlsx",
+    },
+  };
+};
+
+
+export const sendInvoiceEmailForUser = async (authHeader, invoiceId) => {
+  const user = await getAuthorizedUser(authHeader);
+  if (!user) return { status: 401, body: { message: "unauthorized" } };
+
+  const targetInvoiceId = String(invoiceId || "").trim();
+  if (!targetInvoiceId) return { status: 400, body: { message: "invoice id is required" } };
+
+  const invoice = await getInvoiceWithCustomerByIdForAutomation({ userId: user.id, invoiceId: targetInvoiceId });
+  if (!invoice) return { status: 404, body: { message: "invoice not found" } };
+
+  const customerEmail = String(invoice?.customer_email || "").trim();
+  if (!customerEmail) return { status: 400, body: { message: "customer email not found for this invoice" } };
+
+  let buffer;
+  try {
+    buffer = await generateInvoicePdfBuffer({
+      invoice,
+      companyName: String(user?.organization_name || user?.name || "Automora"),
+    });
+  } catch {
+    return { status: 502, body: { message: "Unable to generate invoice PDF" } };
+  }
+
+  const invoiceNumber = String(invoice?.invoice_number || invoice?.id || "invoice").trim() || "invoice";
+  const clientName = String(invoice?.customer_name || invoice?.client_name || "Customer").trim() || "Customer";
+
+  const result = await sendGmailEmail(authHeader, {
+    to: customerEmail,
+    subject: `Invoice ${invoiceNumber} from ${String(user?.organization_name || user?.name || "your company")}`.trim(),
+    body: `Hi ${clientName},\n\nPlease find your invoice ${invoiceNumber} attached as a PDF file.\n\nThank you.`,
+    attachments: [{
+      filename: `invoice-${invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`,
+      contentType: "application/pdf",
+      contentBase64: buffer.toString("base64"),
+    }],
+  });
+
+  if (result.status !== 200) {
+    return result;
+  }
+
+  return {
+    status: 200,
+    body: {
+      message: "Invoice email sent successfully",
+      to: customerEmail,
+      invoiceNumber,
+      gmailMessageId: result?.body?.gmailMessageId || null,
     },
   };
 };

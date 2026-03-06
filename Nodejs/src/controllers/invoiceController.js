@@ -8,6 +8,7 @@ import {
   exportInvoicesExcelForUser,
   importInvoicesExcelForUser,
   getInvoiceImportTemplateForUser,
+  sendInvoiceEmailForUser,
 } from "../services/invoiceService.js";
 
 export const getInvoicesHandler = async (req, res) => {
@@ -71,4 +72,10 @@ export const downloadInvoiceImportTemplateHandler = async (req, res) => {
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${result.body.fileName}"`);
   return res.status(200).send(result.body.buffer);
+};
+
+
+export const sendInvoiceEmailHandler = async (req, res) => {
+  const result = await sendInvoiceEmailForUser(req.headers.authorization, req.params.invoiceId);
+  return res.status(result.status).json(result.body);
 };

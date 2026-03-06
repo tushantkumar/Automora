@@ -143,7 +143,12 @@ export default function MailTemplates() {
       return;
     }
 
-    toast({ title: editingTemplateId ? "Template updated" : "Template created" });
+    toast({
+      title: "✉️ Mail Templates",
+      description: editingTemplateId
+        ? `Mail template "${name}" has been updated.`
+        : `Mail template "${name}" is saved and ready to use.`,
+    });
     setShowForm(false);
     setEditingTemplateId(null);
     void loadTemplates();
@@ -162,7 +167,11 @@ export default function MailTemplates() {
       return;
     }
 
-    toast({ title: "Template deleted" });
+    const templateName = templates.find((item) => item.id === templateId)?.name || templateId;
+    toast({
+      title: "✉️ Mail Templates",
+      description: `Mail template "${templateName}" has been deleted.`,
+    });
     void loadTemplates();
   };
 

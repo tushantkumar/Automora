@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import PDFDocument from "pdfkit";
 import { getMailTemplateById } from "../../db/mailTemplateRepository.js";
 import { createCustomer, getCustomerByEmail, updateCustomerById } from "../../db/customerRepository.js";
 import {
@@ -40,6 +41,117 @@ const interpolateTemplate = (template, context) =>
   });
 
 const toParagraphHtml = (text) => `<p style="margin:0 0 16px;">${String(text || "").split("\n").join("<br/>")}</p>`;
+
+const toCurrency = (value) => {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) return "$0.00";
+  return `$${amount.toFixed(2)}`;
+};
+
+const parseInvoiceLineItems = (lineItems) => {
+  if (Array.isArray(lineItems)) return lineItems;
+
+  const raw = String(lineItems || "").trim();
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const buildAutomationInvoicePdfBuffer = async (invoice, companyName = "Automora") => {
+  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const chunks = [];
+  const done = new Promise((resolve, reject) => {
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  const invoiceNumber = String(invoice?.invoice_number || invoice?.id || "-");
+  const customerName = String(invoice?.customer_name || invoice?.client_name || "-");
+  const customerEmail = String(invoice?.customer_email || "-");
+  const issueDate = String(invoice?.issue_date || "").slice(0, 10) || "-";
+  const dueDate = String(invoice?.due_date || "").slice(0, 10) || "-";
+  const status = String(invoice?.status || "-");
+  const amount = toCurrency(invoice?.amount);
+  const lineItems = parseInvoiceLineItems(invoice?.line_items);
+  const taxRate = `${Number(invoice?.tax_rate || 0).toFixed(2)}%`;
+  const notes = String(invoice?.notes || "-");
+  const subtotalValue = (lineItems.length > 0
+    ? lineItems.reduce((sum, item) => sum + (Number(item?.quantity || 0) * Number(item?.rate || 0)), 0)
+    : Number(invoice?.amount || 0));
+  const subtotal = toCurrency(subtotalValue);
+
+  let y = 40;
+  doc.roundedRect(40, y, 515, 76, 12).fillAndStroke("#4f46e5", "#4338ca");
+  doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(24).text(`${String(companyName || "Automora")} Invoice`, 56, y + 18);
+  doc.fillColor("#e0e7ff").font("Helvetica").fontSize(11).text(`Invoice ${invoiceNumber}`, 56, y + 50);
+  doc.fillColor("#f3f4f6").font("Helvetica").fontSize(11).text(`Generated: ${new Date().toLocaleDateString()}`, 420, y + 24, { align: "right", width: 120 });
+
+  y += 96;
+  doc.roundedRect(40, y, 250, 122, 10).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("BILLED TO", 54, y + 14);
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(12).text(customerName, 54, y + 34, { width: 220 });
+  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(customerEmail, 54, y + 56, { width: 220 });
+
+  doc.roundedRect(305, y, 250, 122, 10).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("INVOICE DETAILS", 319, y + 14);
+  doc.fillColor("#111827").font("Helvetica").fontSize(10);
+  doc.text(`Issue Date: ${issueDate}`, 319, y + 34);
+  doc.text(`Due Date: ${dueDate}`, 319, y + 50);
+  doc.text(`Status: ${status}`, 319, y + 66);
+  doc.text(`Tax: ${taxRate}`, 319, y + 82);
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Grand Total: ${amount}`, 319, y + 100);
+
+  y += 132;
+  doc.roundedRect(40, y, 515, 42, 8).fillAndStroke("#ffffff", "#e5e7eb");
+  doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(10).text("NOTES", 52, y + 10);
+  doc.fillColor("#374151").font("Helvetica").fontSize(10).text(notes, 110, y + 10, { width: 430 });
+
+  y += 58;
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(12).text("Line Items", 40, y);
+  y += 20;
+
+  doc.roundedRect(40, y, 515, 26, 6).fillAndStroke("#ede9fe", "#ddd6fe");
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(9);
+  doc.text("Description", 52, y + 8, { width: 260 });
+  doc.text("Qty", 330, y + 8, { width: 60, align: "right" });
+  doc.text("Rate", 395, y + 8, { width: 70, align: "right" });
+  doc.text("Total", 470, y + 8, { width: 70, align: "right" });
+  y += 30;
+
+  const rows = lineItems.length > 0 ? lineItems : [{ description: "Invoice Amount", quantity: 1, rate: Number(invoice?.amount || 0) }];
+
+  rows.forEach((item) => {
+    if (y > 760) {
+      doc.addPage();
+      y = 48;
+    }
+
+    const qty = Number(item?.quantity || 0);
+    const rate = Number(item?.rate || 0);
+    const total = qty * rate;
+
+    doc.roundedRect(40, y, 515, 24, 5).fillAndStroke("#ffffff", "#e5e7eb");
+    doc.fillColor("#111827").font("Helvetica").fontSize(9);
+    doc.text(String(item?.description || "-"), 52, y + 7, { width: 260 });
+    doc.text(String(qty), 330, y + 7, { width: 60, align: "right" });
+    doc.text(toCurrency(rate), 395, y + 7, { width: 70, align: "right" });
+    doc.text(toCurrency(total), 470, y + 7, { width: 70, align: "right" });
+    y += 28;
+  });
+
+  y += 10;
+  doc.roundedRect(340, y, 215, 34, 8).fillAndStroke("#f5f3ff", "#ddd6fe");
+  doc.fillColor("#4c1d95").font("Helvetica-Bold").fontSize(12).text(`Subtotal: ${subtotal}`, 355, y + 11);
+
+  doc.end();
+  return done;
+};
 
 const resolveRecipient = (context) => {
   const candidates = [
@@ -128,7 +240,8 @@ const renderTemplateEmail = async ({ automation, userId, context, bodyTextOverri
     supportHighlightText: systemSettings.supportHighlightText,
   });
 
-  return { to: recipient, subject, body: finalBodyText, html };
+  const organization_name = renderContext?.user?.organization_name;
+  return { to: recipient, subject, body: finalBodyText, html, invoice, organization_name};
 };
 
 
@@ -167,13 +280,25 @@ const encodeBase64Url = (value) =>
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 
-const buildRawEmail = ({ to, from, subject, bodyText, htmlBody, inReplyTo, references }) => {
+const toBase64Chunks = (value, size = 76) => {
+  const text = String(value || "").replace(/\s+/g, "");
+  const chunks = [];
+  for (let i = 0; i < text.length; i += size) {
+    chunks.push(text.slice(i, i + size));
+  }
+  return chunks.join("\r\n");
+};
+
+const buildRawEmail = ({ to, from, subject, bodyText, htmlBody, inReplyTo, references, attachments = [] }) => {
   const normalizedHtmlBody = String(htmlBody || "").trim();
   const normalizedTextBody = String(bodyText || "").trim();
+  const normalizedAttachments = Array.isArray(attachments)
+    ? attachments.filter((item) => String(item?.contentBase64 || "").trim())
+    : [];
+
   const headers = [
     `To: ${String(to || "").trim()}`,
     `From: ${String(from || "").trim()}`,
-    `Content-Type: ${normalizedHtmlBody ? "text/html" : "text/plain"}; charset=utf-8`,
     "MIME-Version: 1.0",
     `Subject: ${String(subject || "").trim() || "(no subject)"}`,
   ];
@@ -181,10 +306,42 @@ const buildRawEmail = ({ to, from, subject, bodyText, htmlBody, inReplyTo, refer
   if (inReplyTo) headers.push(`In-Reply-To: ${String(inReplyTo).trim()}`);
   if (references) headers.push(`References: ${String(references).trim()}`);
 
-  return [...headers, "", normalizedHtmlBody || normalizedTextBody].join("\r\n");
+  if (normalizedAttachments.length === 0) {
+    headers.push(`Content-Type: ${normalizedHtmlBody ? "text/html" : "text/plain"}; charset="UTF-8"`);
+    return [...headers, "", normalizedHtmlBody || normalizedTextBody].join("\r\n");
+  }
+
+  const boundary = `mixed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+
+  const bodyContentType = normalizedHtmlBody ? "text/html" : "text/plain";
+  const bodyContent = normalizedHtmlBody || normalizedTextBody;
+  const parts = [
+    `--${boundary}`,
+    `Content-Type: ${bodyContentType}; charset="UTF-8"`,
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    bodyContent,
+  ];
+
+  normalizedAttachments.forEach((attachment) => {
+    const filename = String(attachment?.filename || "attachment.bin").replace(/["\r\n]/g, "");
+    const contentType = String(attachment?.contentType || "application/octet-stream");
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${contentType}; name="${filename}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${filename}"`,
+      "",
+      toBase64Chunks(attachment?.contentBase64 || ""),
+    );
+  });
+
+  parts.push(`--${boundary}--`, "");
+  return [...headers, "", ...parts].join("\r\n");
 };
 
-const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody = "", replyToExternalId = "", from }) => {
+const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody = "", replyToExternalId = "", from, attachments = [] }) => {
   const integration = await getEmailIntegrationByProvider({ userId, provider: "gmail" });
   if (!integration?.access_token) {
     throw new Error("Gmail is not connected");
@@ -252,7 +409,7 @@ const sendViaConnectedGmail = async ({ userId, to, subject, bodyText, htmlBody =
     threadId = String(replyMessage?.data?.threadId || "").trim();
   }
 
-  const raw = encodeBase64Url(buildRawEmail({ to, from, subject, bodyText, htmlBody, inReplyTo, references }));
+  const raw = encodeBase64Url(buildRawEmail({ to, from, subject, bodyText, htmlBody, inReplyTo, references, attachments }));
   await gmail.users.messages.send({
     userId: "me",
     requestBody: {
@@ -266,6 +423,21 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
   const replyToExternalId = String(context?.email?.externalId || "").trim();
 
   const systemSettings = await getEffectiveSystemSettingsByUserId(userId);
+  const hasInvoice = Boolean(rendered.invoice);
+  const attachments = [];
+
+  if (hasInvoice) {
+    const pdfBuffer = await buildAutomationInvoicePdfBuffer(
+      rendered.invoice,
+      String(rendered?.organization_name || rendered?.user?.name || "Automora"),
+    );
+    const invoiceNumber = String(rendered.invoice?.invoice_number || rendered.invoice?.id || "invoice").replace(/[^a-zA-Z0-9-_]/g, "_");
+    attachments.push({
+      filename: `invoice-${invoiceNumber}.pdf`,
+      contentType: "application/pdf",
+      contentBase64: pdfBuffer.toString("base64"),
+    });
+  }
 
   await sendViaConnectedGmail({
     userId,
@@ -273,8 +445,9 @@ const executeTemplateMailSend = async ({ automation, userId, context, bodyTextOv
     from: systemSettings.smtpFrom,
     subject: rendered.subject,
     bodyText: rendered.body,
-    htmlBody: rendered.html,
+    htmlBody: hasInvoice ? "" : rendered.html,
     replyToExternalId,
+    attachments,
   });
 
   return { to: rendered.to, subject: rendered.subject, body: rendered.body, mode: "sent" };

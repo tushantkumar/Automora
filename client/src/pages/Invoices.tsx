@@ -16,6 +16,7 @@ type Invoice = {
   customer_id?: string | null;
   invoice_number: string;
   client_name: string;
+  customer_email?: string | null;
   issue_date: string;
   due_date: string;
   amount: number;
@@ -89,6 +90,7 @@ export default function Invoices() {
   const [confirmAction, setConfirmAction] = useState<null | (() => void)>(null);
   const { toast } = useToast();
   const [isUploading, setIsUploading] = useState(false);
+  const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const openConfirmDialog = (title: string, description: string, onConfirm: () => void) => {
@@ -318,7 +320,12 @@ export default function Invoices() {
       return;
     }
 
-    toast({ title: editingInvoiceId ? "Invoice updated" : "Invoice created" });
+    toast({
+      title: "🧾 Invoices",
+      description: editingInvoiceId
+        ? `Invoice ${form.invoiceNumber || "-"} has been updated.`
+        : `Invoice ${form.invoiceNumber || "-"} for ${form.clientName || "Unknown customer"} has been generated.`,
+    });
     setShowForm(false);
     setForm(initialForm);
     setEditingInvoiceId(null);
@@ -348,7 +355,11 @@ export default function Invoices() {
       return;
     }
 
-    toast({ title: "Invoice deleted" });
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    toast({
+      title: "🧾 Invoices",
+      description: `Invoice ${invoice?.invoice_number || invoiceId} has been deleted.`,
+    });
     void loadInvoices();
     void loadInsights();
   };
@@ -494,6 +505,38 @@ export default function Invoices() {
       window.URL.revokeObjectURL(downloadUrl);
     } catch {
       toast({ title: "Unable to download invoice", description: "Please try again." });
+    }
+  };
+
+
+  const sendInvoiceEmail = async (invoice: Invoice) => {
+    if (!token) {
+      toast({ title: "You are not logged in" });
+      return;
+    }
+
+    setSendingInvoiceId(invoice.id);
+    try {
+      const response = await fetch(`${AUTH_API_URL}/invoices/${invoice.id}/send-email`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast({ title: "Unable to send invoice email", description: data?.message || "Please try again." });
+        return;
+      }
+
+      const recipient = String(data?.to || invoice.customer_email || "customer");
+      toast({
+        title: "🧾 Invoices",
+        description: `Invoice ${invoice.invoice_number || invoice.id} has been emailed to ${recipient}.`,
+      });
+    } catch {
+      toast({ title: "Unable to send invoice email", description: "Please try again." });
+    } finally {
+      setSendingInvoiceId(null);
     }
   };
 
@@ -671,7 +714,15 @@ export default function Invoices() {
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { void downloadInvoicePdf(invoice.id); }}><Download className="w-4 h-4" /></Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-primary"><Send className="w-4 h-4" /></Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-primary"
+                        disabled={sendingInvoiceId === invoice.id}
+                        onClick={() => { void sendInvoiceEmail(invoice); }}
+                      >
+                        <Send className="w-4 h-4" />
+                      </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(invoice)}><Pencil className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeInvoice(invoice.id)}><Trash2 className="w-4 h-4" /></Button>
                     </div>

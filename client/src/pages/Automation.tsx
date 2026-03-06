@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -142,6 +143,7 @@ const defaultFormValues: FormValues = {
 };
 
 export default function Automation() {
+  const [, navigate] = useLocation();
   const { toast } = useToast();
   const token = localStorage.getItem("authToken") || "";
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -243,6 +245,17 @@ export default function Automation() {
     });
   }, [page, appliedSearch]);
 
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") !== "true") return;
+
+    void resetForCreate().then(() => {
+      navigate("/automation");
+    });
+  }, []);
+
   useEffect(() => {
     if (action === "CRM") form.setValue("subAction", "Upsert CRM");
     else if (action === "Invoice") form.setValue("subAction", "Upsert Invoice");
@@ -294,10 +307,16 @@ export default function Automation() {
 
       if (editing) {
         await axios.put(`${AUTH_API_URL}/automations/${editing.id}`, payload, { headers });
-        toast({ title: "Automation updated" });
+        toast({
+          title: "⚙️ Automations",
+          description: `Automation "${values.name}" was updated successfully.`,
+        });
       } else {
         await axios.post(`${AUTH_API_URL}/automations`, payload, { headers });
-        toast({ title: "Automation created" });
+        toast({
+          title: "⚙️ Automations",
+          description: `Automation "${values.name}" has been successfully created.`,
+        });
       }
 
       setOpenModal(false);
@@ -312,7 +331,10 @@ export default function Automation() {
     try {
       await axios.delete(`${AUTH_API_URL}/automations/${deleteTarget.id}`, { headers });
       setDeleteTarget(null);
-      toast({ title: "Automation deleted" });
+      toast({
+        title: "⚙️ Automations",
+        description: `Automation "${deleteTarget.name}" has been deleted.`,
+      });
       await loadAutomations(page, appliedSearch);
     } catch (error) {
       toast({ title: "Delete failed", description: (error as Error).message });
@@ -322,9 +344,13 @@ export default function Automation() {
   const toggleStatus = async (row: AutomationRow) => {
     try {
       await axios.patch(`${AUTH_API_URL}/automations/${row.id}/toggle`, { isActive: !row.is_active }, { headers });
+      toast({
+        title: "⚙️ Automations",
+        description: `Automation "${row.name}" is now ${row.is_active ? "inactive" : "active"}.`,
+      });
       await loadAutomations(page, appliedSearch);
     } catch (error) {
-      toast({ title: "Toggle failed", description: (error as Error).message });
+      toast({ title: "⚙️ Automations", description: `Unable to update automation status. ${(error as Error).message}` });
     }
   };
 
