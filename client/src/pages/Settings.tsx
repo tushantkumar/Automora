@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -84,9 +84,6 @@ export default function Settings() {
   const [deleteOtp, setDeleteOtp] = useState("");
   const [systemSettings, setSystemSettings] = useState<SystemSettingsState>(initialSystemSettings);
   const [loadingSystemSettings, setLoadingSystemSettings] = useState(true);
-  const [savingSystemSettings, setSavingSystemSettings] = useState(false);
-  const [confirmSystemUpdateOpen, setConfirmSystemUpdateOpen] = useState(false);
-  const [systemUpdatedPopupOpen, setSystemUpdatedPopupOpen] = useState(false);
   const { toast } = useToast();
 
   const loadIntegrations = async () => {
@@ -134,39 +131,6 @@ export default function Settings() {
       // best effort
     } finally {
       setLoadingSystemSettings(false);
-    }
-  };
-
-  const saveSystemSettings = async () => {
-    if (!token) return;
-
-    setSavingSystemSettings(true);
-
-    try {
-      const response = await fetch(`${AUTH_API_URL}/system-settings`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(systemSettings),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        toast({ title: "⚙️ Settings", description: data?.message || "Unable to save system settings. Please try again." });
-        return;
-      }
-
-      setSystemSettings({
-        companyName: String(data?.settings?.companyName || ""),
-      });
-      toast({ title: "⚙️ Settings", description: "System settings saved successfully." });
-      setSystemUpdatedPopupOpen(true);
-    } catch {
-      toast({ title: "⚙️ Settings", description: "Unable to save system settings. Please try again." });
-    } finally {
-      setSavingSystemSettings(false);
     }
   };
 
@@ -385,18 +349,15 @@ export default function Settings() {
                 <Input
                   id="company-name"
                   value={systemSettings.companyName}
-                  onChange={(event) => setSystemSettings((prev) => ({ ...prev, companyName: event.target.value }))}
+                  readOnly
                   placeholder="Automora"
-                  disabled={loadingSystemSettings || savingSystemSettings}
+                  disabled
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="status">Status</Label>
                 <Input id="status" value={profile.status} readOnly disabled={loadingProfile} />
               </div>
-              <Button onClick={() => setConfirmSystemUpdateOpen(true)} disabled={loadingSystemSettings || savingSystemSettings}>
-                {savingSystemSettings ? "Saving..." : "Save Changes"}
-              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -480,41 +441,6 @@ export default function Settings() {
         </TabsContent>
       </Tabs>
 
-      <AlertDialog open={confirmSystemUpdateOpen} onOpenChange={setConfirmSystemUpdateOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Update system settings?</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={savingSystemSettings}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={savingSystemSettings}
-              onClick={(event) => {
-                event.preventDefault();
-                setConfirmSystemUpdateOpen(false);
-                void saveSystemSettings();
-              }}
-            >
-              {savingSystemSettings ? "Updating..." : "Update Settings"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <Dialog open={systemUpdatedPopupOpen} onOpenChange={setSystemUpdatedPopupOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>System settings updated</DialogTitle>
-            <DialogDescription>
-              Your changes have been saved successfully.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={() => setSystemUpdatedPopupOpen(false)}>OK</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -527,7 +453,7 @@ export default function Settings() {
             <AlertDialogCancel disabled={sendingDeleteOtp}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={sendingDeleteOtp}
-              onClick={(event) => {
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
                 event.preventDefault();
                 setConfirmDeleteOpen(false);
                 void requestDeleteOtp();
