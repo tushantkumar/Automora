@@ -94,7 +94,6 @@ export default function Auth() {
           </h2>
           <p className="text-muted-foreground mt-2">
             {isLogin ? "Enter your details to access your dashboard" : "Get started with AI automation today"}
-            {!isLogin && selectedPlan ? ` (15-day free trial on ${selectedPlan[0].toUpperCase()}${selectedPlan.slice(1)} plan)` : ""}
           </p>
         </div>
 
